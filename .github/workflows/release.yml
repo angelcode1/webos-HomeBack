@@ -51,9 +51,17 @@ jobs:
         run: |
           sha256sum "$IPK_PATH" > "${IPK_PATH}.sha256"
           cat "${IPK_PATH}.sha256"
+      - name: Generate Homebrew manifest
+        run: |
+          IPK_HASH="$(cut -d' ' -f1 "${IPK_PATH}.sha256")"
+          IPK_NAME="$(basename "$IPK_PATH")"
+          MANIFEST_PATH="com.homebrew.homeback.manifest.json"
+          IPK_HASH="$IPK_HASH" IPK_NAME="$IPK_NAME" MANIFEST_PATH="$MANIFEST_PATH" node scripts/generate-manifest.cjs
+          cat "$MANIFEST_PATH"
+          echo "MANIFEST_PATH=$MANIFEST_PATH" >> "$GITHUB_ENV"
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${GITHUB_REF_NAME}" "$IPK_PATH" "${IPK_PATH}.sha256" --clobber 2>/dev/null || \
-          gh release create "${GITHUB_REF_NAME}" "$IPK_PATH" "${IPK_PATH}.sha256" --title "HomeBack ${VERSION}" --generate-notes
+          gh release upload "${GITHUB_REF_NAME}" "$IPK_PATH" "${IPK_PATH}.sha256" "$MANIFEST_PATH" --clobber 2>/dev/null || \
+          gh release create "${GITHUB_REF_NAME}" "$IPK_PATH" "${IPK_PATH}.sha256" "$MANIFEST_PATH" --title "HomeBack ${VERSION}" --generate-notes
