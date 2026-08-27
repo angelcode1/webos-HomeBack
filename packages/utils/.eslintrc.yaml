@@ -1,2 +1,10 @@
-# No overrides needed; inherits the root .eslintrc.yaml config.
-{}
+extends:
+  - ../../.eslintrc.yaml
+
+parser: '@typescript-eslint/parser'
+parserOptions:
+  project: ./tsconfig.json
+  ecmaVersion: 2020
+
+env:
+  node: true
