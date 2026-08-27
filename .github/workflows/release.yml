@@ -47,6 +47,9 @@ jobs:
           test -f "$IPK"
           echo "IPK_PATH=$IPK" >> "$GITHUB_ENV"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+      - name: Fix IPK Installed-Size (packager plugin limitation)
+        run: |
+          bash scripts/fix-ipk-installed-size.sh "$IPK_PATH"
       - name: Generate SHA256 checksum
         run: |
           sha256sum "$IPK_PATH" > "${IPK_PATH}.sha256"
