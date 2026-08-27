@@ -1,0 +1,63 @@
+name: Build and Release HomeBack
+on:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: write
+jobs:
+  release:
+    name: Build IPK and create release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'yarn'
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare yarn@4.12.0 --activate
+          yarn --version
+      - name: Install dependencies
+        run: yarn install --immutable
+      - name: Verify source
+        run: yarn check:full
+      - name: Verify publication
+        env:
+          HOMEBACK_NATIVE_REDISTRIBUTION_CONFIRMED: ${{ vars.HOMEBACK_NATIVE_REDISTRIBUTION_CONFIRMED }}
+        run: yarn verify:publication
+      - name: Build production IPK
+        run: |
+          rm -rf dist
+          yarn build
+      - name: Show build output
+        run: |
+          echo "Build output:"
+          find dist -maxdepth 1 -type f -print
+          ls -lh dist
+      - name: Validate IPK exists
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          APP_ID="$(node -p "require('./package.json').id")"
+          IPK="dist/${APP_ID}_${VERSION}_all.ipk"
+          echo "Expected IPK: $IPK"
+          test -f "$IPK"
+          echo "IPK_PATH=$IPK" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+      - name: Generate SHA256 checksum
+        run: |
+          sha256sum "$IPK_PATH" > "${IPK_PATH}.sha256"
+          cat "${IPK_PATH}.sha256"
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "$IPK_PATH" \
+            "${IPK_PATH}.sha256" \
+            --title "HomeBack ${VERSION}" \
+            --generate-notes
