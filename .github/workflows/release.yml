@@ -52,12 +52,9 @@ jobs:
         run: |
           sha256sum "$IPK_PATH" > "${IPK_PATH}.sha256"
           cat "${IPK_PATH}.sha256"
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            "$IPK_PATH" \
-            "${IPK_PATH}.sha256" \
-            --title "HomeBack ${VERSION}" \
-            --generate-notes
+          gh release upload "${GITHUB_REF_NAME}" "$IPK_PATH" "${IPK_PATH}.sha256" --clobber 2>/dev/null || \
+          gh release create "${GITHUB_REF_NAME}" "$IPK_PATH" "${IPK_PATH}.sha256" --title "HomeBack ${VERSION}" --generate-notes
