@@ -1,0 +1,14 @@
+{
+	"extends": "../../tsconfig.json",
+	"compilerOptions": {
+		"strict": true,
+		"baseUrl": "./",
+		"types": [
+			"node"
+		]
+	},
+	"include": [
+		"./src",
+		"webpack.config.ts"
+	]
+}

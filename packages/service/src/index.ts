@@ -1,0 +1,79 @@
+import { Service, ServiceError } from './bus';
+import { readLaunchPointIcon, type IconRequest } from './app-catalog';
+import { APP_ID } from './environment';
+import { HomeBackBootstrap } from './bootstrap';
+import { getUid } from './utils';
+
+const service = new Service();
+const bootstrap = new HomeBackBootstrap(service);
+
+const selfStartRemoteInput = async (): Promise<void> => {
+	if (getUid() !== 0) return;
+
+	try {
+		await bootstrap.remoteInput.start();
+		console.log('HomeBack root helper self-started remote input.');
+	} catch (error) {
+		console.error('HomeBack root helper could not self-start remote input:', error);
+	}
+};
+
+service.registerSimple<IconRequest>('/readIcon', async request => ({
+	done: true,
+	dataUrl: await readLaunchPointIcon(request ?? {}),
+}));
+
+service.registerSimple('/bootstrap', async () => ({
+	done: true,
+	...(await bootstrap.apply()),
+}));
+
+service.registerSimple('/remote/start', async () => {
+	if (getUid() !== 0) throw new ServiceError('HomeBack helper service is not running as root.', -401);
+	await bootstrap.remoteInput.start();
+	return { done: true, status: bootstrap.remoteInput.status() };
+});
+
+service.registerSimple('/remote/status', () => ({
+	done: true,
+	status: bootstrap.remoteInput.status(),
+}));
+
+service.registerSimple('/restartService', () => {
+	setTimeout(() => process.exit(0), 100);
+	return { done: true };
+});
+
+service.registerSimple('/restartApp', () => {
+	setTimeout(() => {
+		void (async () => {
+			try {
+				await service.oneshot('luna://com.webos.applicationManager/closeByAppId', { id: APP_ID });
+			} catch {
+				// App may already be gone.
+			}
+
+			await new Promise(resolve => setTimeout(resolve, 400));
+
+			try {
+				await service.oneshot('luna://com.webos.applicationManager/launch', { id: APP_ID });
+			} catch (error) {
+				console.error('Unable to relaunch HomeBack after ACG bootstrap:', error);
+			}
+		})();
+	}, 100);
+
+	return { done: true };
+});
+
+if (__DEV__) {
+	service.registerSimple('/quit', () => {
+		setTimeout(() => process.exit(0), 100);
+		return { returnValue: true, message: 'Bye bye!' };
+	});
+}
+
+// @invariant: root-helper-self-start
+setTimeout(() => {
+	void selfStartRemoteInput();
+}, 0);

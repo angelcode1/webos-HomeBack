@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "defaultLongPressMs": 650,
+  "keys": {
+    "362": {
+      "action": "replace",
+      "keycode": 795
+    },
+    "428": {
+      "action": "replace",
+      "keycode": 119
+    },
+    "773": {
+      "label": "HOME (LG Magic Remote; edit keycode if your model differs)",
+      "short": {
+        "action": "launch",
+        "id": "com.homebrew.homeback",
+        "params": {
+          "intent": "homeback:show"
+        }
+      },
+      "long": {
+        "action": "launch",
+        "id": "com.webos.app.home"
+      }
+    },
+    "994": {
+      "action": "replace",
+      "keycode": 174
+    },
+    "1037": {
+      "label": "Netflix button",
+      "short": {
+        "action": "launch",
+        "id": "youtube.leanback.v4"
+      },
+      "long": {
+        "action": "launch",
+        "id": "com.webos.app.usbc1"
+      }
+    },
+    "1038": {
+      "label": "Prime Video button",
+      "short": {
+        "action": "launch",
+        "id": "com.webos.app.hdmi1"
+      },
+      "long": {
+        "action": "launch",
+        "id": "com.webos.app.usbc2"
+      }
+    },
+    "1042": {
+      "label": "Disney+ button",
+      "short": {
+        "action": "launch",
+        "id": "com.webos.app.hdmi2"
+      },
+      "long": {
+        "action": "replace",
+        "keycode": 398
+      }
+    },
+    "1043": {
+      "label": "Stan button",
+      "short": {
+        "action": "launch",
+        "id": "com.webos.app.hdmi3"
+      },
+      "long": {
+        "action": "replace",
+        "keycode": 399
+      }
+    },
+    "1086": {
+      "label": "LG Channels button",
+      "short": {
+        "action": "launch",
+        "id": "com.webos.app.hdmi4"
+      },
+      "long": {
+        "action": "replace",
+        "keycode": 400
+      }
+    },
+    "1111": {
+      "label": "Alexa button",
+      "short": {
+        "action": "launch",
+        "id": "cdp-30"
+      },
+      "long": {
+        "action": "replace",
+        "keycode": 401
+      }
+    },
+    "1124": {
+      "action": "replace",
+      "keycode": 113
+    }
+  }
+}
