@@ -10,7 +10,7 @@
 # archive, adding the field to the control file, and repacking it.
 set -euo pipefail
 
-IPK="$1"
+IPK="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
