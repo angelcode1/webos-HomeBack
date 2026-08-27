@@ -1,0 +1,28 @@
+{
+	"id": "@APP_ID@",
+	"version": "@APP_VERSION@",
+	"type": "web",
+	"main": "index.html",
+	"title": "HomeBack",
+	"icon": "icon80.png",
+	"largeIcon": "icon130.png",
+	"iconColor": "#A50034",
+	"noSplashOnLaunch": true,
+	"spinnerOnLaunch": false,
+	"disableBackHistoryAPI": true,
+	"supportQuickStart": true,
+	"visible": true,
+	"defaultWindowType": "floating",
+	"handlesRelaunch": true,
+	"services": [
+		"@SERVICE_ID@"
+	],
+	"requiredPermissions": [
+		"@SERVICE_ID@.group",
+		"application.operation",
+		"application.launcher",
+		"applications.internal",
+		"eim.deviceInfo",
+		"tv.settings"
+	]
+}

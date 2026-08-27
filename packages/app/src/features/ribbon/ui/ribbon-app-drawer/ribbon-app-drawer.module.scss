@@ -1,0 +1,53 @@
+.root {
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+}
+
+.backdrop {
+	position: fixed;
+	inset: 0;
+	overflow: hidden;
+
+	background: #0e0e0e;
+	opacity: 0;
+	transition: opacity 220ms ease;
+	will-change: opacity;
+}
+
+.drawer {
+	position: fixed;
+	top: 0;
+	right: 0;
+	bottom: 0;
+
+	display: flex;
+	flex-direction: column;
+
+	width: 640px;
+	height: 100%;
+
+	color: #e3e3e3;
+	background: #1f1f1f;
+	transform: translateX(640px) translateZ(1px);
+	transition: transform 220ms ease;
+	will-change: transform;
+}
+
+.active {
+	pointer-events: auto;
+
+	.backdrop {
+		opacity: 0.6;
+	}
+
+	.drawer {
+		transform: translateX(0) translateZ(1px);
+	}
+}
+
+.header {
+	margin: 0 0 1rem;
+	padding: 2rem;
+	background: #2d2f31;
+}

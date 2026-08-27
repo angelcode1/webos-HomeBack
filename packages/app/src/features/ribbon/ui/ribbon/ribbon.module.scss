@@ -1,0 +1,20 @@
+.group {
+	position: fixed;
+	inset: 0;
+
+	display: flex;
+	align-items: flex-end;
+	overflow-x: scroll;
+
+	transform: translateY(105%);
+	transition: transform 500ms cubic-bezier(0.075, 0.82, 0.165, 1);
+	will-change: transform;
+
+	&::-webkit-scrollbar {
+		display: none;
+	}
+}
+
+.visible {
+	transform: translateY(1px);
+}

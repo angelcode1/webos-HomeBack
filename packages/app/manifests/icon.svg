@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320" fill="none">
+  <title>HomeBack</title>
+  <desc>Home symbol above a counter-clockwise return arrow</desc>
+
+  <rect width="320" height="320" rx="64" fill="#A50034"/>
+
+  <!-- Refined classic home glyph from the new launcher design. -->
+  <path d="M160 54L236 118V132H214V216H106V132H84V118L160 54Z" fill="#FFFFFF"/>
+  <rect x="136" y="160" width="48" height="56" rx="5" fill="#A50034"/>
+
+  <!-- Reverse-Amazon-smile return arrow restored from the previous HomeBack icon. -->
+  <path d="M244 190C237 239 198 270 151 270C104 270 66 244 51 205"
+        fill="none" stroke="#6B6B6B" stroke-width="34" stroke-linecap="round"/>
+  <path d="M244 190C237 239 198 270 151 270C104 270 66 244 51 205"
+        fill="none" stroke="#FF0844" stroke-width="22" stroke-linecap="round"/>
+  <path d="M51 205L34 237M51 205L86 211"
+        fill="none" stroke="#6B6B6B" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M51 205L34 237M51 205L86 211"
+        fill="none" stroke="#FF0844" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
