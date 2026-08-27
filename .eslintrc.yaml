@@ -1,0 +1,152 @@
+root: true
+
+settings:
+  import/resolver:
+    typescript: true
+
+env:
+  node: true
+
+extends:
+  - eslint:recommended
+  - prettier
+  - 'plugin:react/jsx-runtime'
+  - 'plugin:react-hooks/recommended'
+  - 'plugin:import/recommended'
+  - 'plugin:import/typescript'
+
+plugins:
+  - prettier
+  - '@typescript-eslint'
+
+rules:
+  # Formatting remains advisory; correctness-oriented lint rules gate releases.
+  prettier/prettier: warn
+
+  max-len:
+    - warn
+    - code: 120
+
+  no-void:
+    - error
+    - allowAsStatement: true
+
+  no-underscore-dangle:
+    - error
+    - allow: [ __DEV__ ]
+
+  no-restricted-globals:
+    - error
+    - React
+
+  no-restricted-imports:
+    - error
+    - patterns: [ '../../../*' ]
+
+  no-restricted-exports:
+    - error
+    - restrictDefaultExports:
+        direct: true
+
+  '@typescript-eslint/no-floating-promises':
+    - error
+    - ignoreVoid: true
+
+  import/prefer-default-export: off
+  import/no-extraneous-dependencies: off
+
+  # Type-only imports are a style preference, not a release gate. The ESLint 8 /
+  # typescript-eslint 8 fixer can emit invalid TS2206 mixed imports in this tree.
+  # Keep it disabled until that fixer is safe for the supported toolchain.
+  '@typescript-eslint/consistent-type-imports': off
+
+  import/order:
+    - warn
+    - alphabetize:
+        order: asc
+      newlines-between: always
+      groups: [ builtin, external, internal, parent, sibling ]
+      pathGroupsExcludedImportTypes: [ builtin ]
+      pathGroups:
+        - pattern: webpack{,-dev-server}
+          group: external
+          position: before
+        - pattern: react{,-dom/*}
+          group: external
+          position: before
+        - pattern: mobx{,-react-lite}
+          group: external
+          position: before
+        - pattern: '@**'
+          group: external
+          position: before
+        - pattern: '@kitsuned/**'
+          group: external
+          position: after
+        - pattern: '@althome/**'
+          group: internal
+          position: before
+        - pattern: shared/**
+          group: internal
+          position: before
+        - pattern: assets/**
+          group: sibling
+          position: after
+
+overrides:
+  - files: [ '*.ts', '*.tsx' ]
+    globals:
+      __DEV__: readonly
+      PalmServiceBridge: readonly
+      webOSSystem: readonly
+    rules:
+      # Base ESLint rules that either duplicate TypeScript's compiler or misread TS syntax.
+      constructor-super: off
+      getter-return: off
+      no-const-assign: off
+      no-dupe-args: off
+      no-dupe-class-members: off
+      no-dupe-keys: off
+      no-func-assign: off
+      no-import-assign: off
+      no-new-symbol: off
+      no-obj-calls: off
+      no-redeclare: off
+      no-setter-return: off
+      no-this-before-super: off
+      no-undef: off
+      no-unreachable: off
+      no-unsafe-negation: off
+      no-unused-vars: off
+      no-underscore-dangle: off
+      valid-typeof: off
+      # ESLint's JS require-yield rule flags intentional async-generator adapters.
+      require-yield: off
+
+      '@typescript-eslint/no-unused-vars':
+        - error
+        - argsIgnorePattern: '^_'
+          varsIgnorePattern: '^_'
+          caughtErrorsIgnorePattern: '^_'
+          ignoreRestSiblings: true
+
+      # eslint-plugin-import's JS export resolver produces false positives on TS syntax.
+      import/default: off
+      import/named: off
+      import/no-named-as-default-member: off
+      import/no-unresolved: off
+      import/extensions:
+        - error
+        - ignorePackages
+        - ts: never
+          tsx: never
+
+  - files: [ '*.config.ts', 'webpack.*.ts' ]
+    rules:
+      no-restricted-exports: off
+
+  - files: '*.d.ts'
+    rules:
+      no-unused-vars: off
+      '@typescript-eslint/no-unused-vars': off
+      no-restricted-exports: off
