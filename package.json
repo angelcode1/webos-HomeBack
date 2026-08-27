@@ -1,7 +1,86 @@
 {
-  "name": "@althome/app",
-  "private": true,
+  "id": "com.homebrew.homeback",
+  "name": "homeback",
+  "version": "0.4.14",
+  "description": "A fast replacement Home launcher and remote-button remapper for rooted LG webOS TVs.",
+  "packageManager": "yarn@4.12.0",
   "scripts": {
-    "lint": "eslint --ext .ts,.tsx,.js ."
-  }
+    "build": "webpack --mode production",
+    "dev": "webpack serve --mode development",
+    "lint": "node scripts/verify-lint-coverage.cjs && yarn workspaces foreach --all --parallel run lint",
+    "typecheck": "tsc -p packages/app/tsconfig.json && tsc -p packages/service/tsconfig.json && tsc -p packages/utils/tsconfig.json",
+    "check": "yarn verify:optimized && yarn test && yarn typecheck",
+    "verify:optimized": "node scripts/verify-optimized-source.cjs",
+    "check:full": "yarn check && yarn lint",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "format": "prettier --write .",
+    "verify:publication": "node scripts/verify-publication.cjs"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "dependencies": {
+    "core-js": "3.48.0",
+    "mitt": "3.0.1",
+    "mobx": "6.15.0",
+    "mobx-react-lite": "3.4.3",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@babel/core": "7.29.0",
+    "@babel/preset-env": "7.29.0",
+    "@babel/preset-react": "7.28.5",
+    "@babel/preset-typescript": "7.28.5",
+    "@babel/register": "7.28.6",
+    "@types/node": "22.19.7",
+    "@types/react": "18.3.27",
+    "@types/react-dom": "18.3.7",
+    "@typescript-eslint/eslint-plugin": "8.68.0",
+    "@typescript-eslint/parser": "8.68.0",
+    "@webosbrew/webos-packager-plugin": "2.0.4",
+    "babel-loader": "9.2.1",
+    "copy-webpack-plugin": "13.0.1",
+    "css-loader": "6.11.0",
+    "eslint": "8.57.1",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-import-resolver-typescript": "3.10.1",
+    "eslint-plugin-import": "2.32.0",
+    "eslint-plugin-prettier": "5.5.5",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "4.6.2",
+    "html-webpack-plugin": "5.6.6",
+    "mini-css-extract-plugin": "2.10.0",
+    "postcss": "8.5.6",
+    "postcss-loader": "7.3.4",
+    "postcss-preset-env": "8.5.1",
+    "prettier": "3.8.1",
+    "sass": "1.97.3",
+    "sass-loader": "13.3.3",
+    "sucrase": "3.35.1",
+    "typescript": "5.9.3",
+    "webpack": "5.105.0",
+    "webpack-cli": "5.1.4",
+    "webpack-dev-server": "4.15.2"
+  },
+  "dependenciesMeta": {
+    "core-js": {
+      "built": false
+    }
+  },
+  "engines": {
+    "node": ">=22",
+    "yarn": ">=4",
+    "npm": "please-use-yarn"
+  },
+  "os": [
+    "!win32"
+  ],
+  "browserslist": [
+    "Chrome >= 79"
+  ],
+  "resolutions": {
+    "typescript": "5.9.3"
+  },
+  "license": "GPL-2.0-only"
 }
