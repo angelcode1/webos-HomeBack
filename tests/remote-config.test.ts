@@ -7,6 +7,7 @@ import {
 	buildNativeKeybinds,
 	validateConfig,
 } from '../packages/service/src/remote-config.ts';
+import { migrateDefaultRemoteShortcuts } from '../packages/service/src/remote-default-migration.lib.ts';
 
 const defaultsPath = path.resolve(
 	process.cwd(),
@@ -76,4 +77,66 @@ test('top-level native replace retains the wider uinput keycode space', () => {
 			362: { action: 'replace', keycode: 1037 },
 		},
 	}), true);
+});
+
+
+test('bundled shortcut defaults use corrected labels and requested action pairs', () => {
+	const defaults = JSON.parse(fs.readFileSync(defaultsPath, 'utf8'));
+	assert.deepEqual(defaults.keys['1043'], {
+		label: 'LG Channels button',
+		short: { action: 'launch', id: 'com.webos.app.hdmi4' },
+		long: { action: 'replace', keycode: 400 },
+	});
+	assert.deepEqual(defaults.keys['1086'], {
+		label: 'Alexa button',
+		short: { action: 'launch', id: 'cdp-30' },
+		long: { action: 'replace', keycode: 401 },
+	});
+	assert.deepEqual(defaults.keys['1111'], {
+		label: 'Model-specific button (observed keycode 1111)',
+		short: { action: 'launch', id: 'com.webos.app.hdmi2' },
+		long: { action: 'replace', keycode: 398 },
+	});
+});
+
+test('default shortcut migration moves long press with short press and preserves custom entries', () => {
+	const config = {
+		version: 1 as const,
+		keys: {
+			'1043': {
+				label: 'Custom physical label',
+				longPressMs: 900,
+				short: { action: 'launch' as const, id: 'com.webos.app.hdmi3' },
+				long: { action: 'replace' as const, keycode: 399 },
+			},
+			'1086': {
+				label: 'Custom mapping',
+				short: { action: 'launch' as const, id: 'youtube.leanback.v4' },
+				long: { action: 'replace' as const, keycode: 400 },
+			},
+			'1111': {
+				label: 'Alexa button',
+				short: { action: 'launch' as const, id: 'cdp-30' },
+				long: { action: 'replace' as const, keycode: 401 },
+			},
+		},
+	};
+
+	assert.equal(migrateDefaultRemoteShortcuts(config), true);
+	assert.deepEqual(config.keys['1043'], {
+		label: 'Custom physical label',
+		longPressMs: 900,
+		short: { action: 'launch', id: 'com.webos.app.hdmi4' },
+		long: { action: 'replace', keycode: 400 },
+	});
+	assert.deepEqual(config.keys['1086'], {
+		label: 'Custom mapping',
+		short: { action: 'launch', id: 'youtube.leanback.v4' },
+		long: { action: 'replace', keycode: 400 },
+	});
+	assert.deepEqual(config.keys['1111'], {
+		label: 'Model-specific button (observed keycode 1111)',
+		short: { action: 'launch', id: 'com.webos.app.hdmi2' },
+		long: { action: 'replace', keycode: 398 },
+	});
 });

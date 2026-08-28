@@ -30,7 +30,7 @@ const appinfo = JSON.parse(read('packages/app/manifests/appinfo.json'));
 const defaults = JSON.parse(read('packages/service/vendor/inputhook/remote-buttons.default.json'));
 
 requireInvariant(pkg.id === 'com.homebrew.homeback', 'Unexpected application id');
-requireInvariant(pkg.version === '0.4.15', 'Unexpected application version');
+requireInvariant(pkg.version === '0.4.16', 'Unexpected application version');
 requireInvariant(pkg.license === 'GPL-2.0-only', 'HomeBack source license must remain GPL-2.0-only');
 requireInvariant(exists('THIRD_PARTY_NOTICES.md'), 'Third-party notices missing');
 requireInvariant(exists('scripts/verify-publication.cjs'), 'public-release provenance gate missing');

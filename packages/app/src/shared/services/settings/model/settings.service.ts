@@ -1,6 +1,7 @@
 import { comparer, makeAutoObservable, reaction, toJS } from 'mobx';
 
-const KEY = 'althome:settings';
+const KEY = 'homeback:settings';
+const LEGACY_KEY = 'althome:settings';
 const MIN_WHEEL_FACTOR = 0.1;
 const MAX_WHEEL_FACTOR = 8;
 
@@ -39,9 +40,12 @@ export class SettingsService {
 
 	private hydrate(): void {
 		let parsed: unknown;
+		let legacyRaw: string | null = null;
 
 		try {
-			parsed = JSON.parse(localStorage.getItem(KEY) ?? '{}');
+			const currentRaw = localStorage.getItem(KEY);
+			legacyRaw = currentRaw === null ? localStorage.getItem(LEGACY_KEY) : null;
+			parsed = JSON.parse(currentRaw ?? legacyRaw ?? '{}');
 		} catch (error) {
 			console.warn('Ignoring invalid HomeBack settings JSON:', error);
 			return;
@@ -59,6 +63,18 @@ export class SettingsService {
 
 		if (Array.isArray(value.order) && value.order.every(item => typeof item === 'string')) {
 			this.order = [...new Set(value.order)];
+		}
+
+		if (legacyRaw !== null) {
+			try {
+				localStorage.setItem(KEY, JSON.stringify({
+					wheelVelocityFactor: this.wheelVelocityFactor,
+					order: this.order,
+				}));
+				localStorage.removeItem(LEGACY_KEY);
+			} catch (error) {
+				console.warn('Unable to migrate legacy HomeBack settings:', error);
+			}
 		}
 	}
 }

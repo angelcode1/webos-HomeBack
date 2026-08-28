@@ -9,8 +9,6 @@ import type { RibbonCardProps } from './ribbon-card.interface';
 
 import s from './ribbon-card.module.scss';
 
-const COLOUR_BUTTON = /^@button:(red|green|yellow|blue)$/;
-
 const cx = (...classes: Array<string | false | undefined>): string =>
 	classes.filter(Boolean).join(' ');
 
@@ -63,7 +61,6 @@ export const RibbonCard = observer(
 
 		const isSelected = service.selectedLaunchPoint === launchPoint;
 		const editing = isSelected && service.moving && !launchPoint.builtin;
-		const isColourButton = COLOUR_BUTTON.test(launchPoint.launchPointId);
 		const isInputTile = launchPoint.launchPointId === '@button:inputs';
 		const isCompactUtility =
 			launchPoint.launchPointId === '@button:keypad' ||
@@ -162,7 +159,6 @@ export const RibbonCard = observer(
 					isSelected && s.selected,
 					editing && s.editing,
 					editing && s.moving,
-					isColourButton && s.colourCard,
 					isInputTile && s.inputCard,
 					isCompactUtility && s.compactUtilityCard,
 				)}
@@ -178,7 +174,6 @@ export const RibbonCard = observer(
 					fallbackIcon={launchPoint.fallbackIcon}
 					className={cx(
 						s.icon,
-						isColourButton && s.colourIcon,
 						isInputTile && s.inputIcon,
 						isCompactUtility && s.compactUtilityIcon,
 					)}
