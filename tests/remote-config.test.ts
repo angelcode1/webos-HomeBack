@@ -140,3 +140,72 @@ test('default shortcut migration corrects labels only and preserves actions', ()
 		long: { action: 'replace', keycode: 401 },
 	});
 });
+
+test('migration repairs the exact bad 0.4.16 shortcut rotation', () => {
+	const config = {
+		version: 1 as const,
+		keys: {
+			'1043': {
+				label: 'LG Channels button',
+				longPressMs: 900,
+				short: { action: 'launch' as const, id: 'com.webos.app.hdmi4' },
+				long: { action: 'replace' as const, keycode: 400 },
+			},
+			'1086': {
+				label: 'Alexa button',
+				short: { action: 'launch' as const, id: 'cdp-30' },
+				long: { action: 'replace' as const, keycode: 401 },
+			},
+			'1111': {
+				label: 'Model-specific button (observed keycode 1111)',
+				short: { action: 'launch' as const, id: 'com.webos.app.hdmi2' },
+				long: { action: 'replace' as const, keycode: 398 },
+			},
+		},
+	};
+
+	assert.equal(migrateDefaultRemoteShortcuts(config), true);
+	assert.deepEqual(config.keys['1043'], {
+		label: 'LG Channels button',
+		longPressMs: 900,
+		short: { action: 'launch', id: 'com.webos.app.hdmi3' },
+		long: { action: 'replace', keycode: 399 },
+	});
+	assert.deepEqual(config.keys['1086'], {
+		label: 'Alexa button',
+		short: { action: 'launch', id: 'com.webos.app.hdmi4' },
+		long: { action: 'replace', keycode: 400 },
+	});
+	assert.deepEqual(config.keys['1111'], {
+		label: 'Model-specific button (observed keycode 1111)',
+		short: { action: 'launch', id: 'cdp-30' },
+		long: { action: 'replace', keycode: 401 },
+	});
+});
+
+test('migration does not rewrite a partial or customized 0.4.16-like state', () => {
+	const config = {
+		version: 1 as const,
+		keys: {
+			'1043': {
+				label: 'LG Channels button',
+				short: { action: 'launch' as const, id: 'com.webos.app.hdmi4' },
+				long: { action: 'replace' as const, keycode: 400 },
+			},
+			'1086': {
+				label: 'Alexa button',
+				short: { action: 'launch' as const, id: 'youtube.leanback.v4' },
+				long: { action: 'replace' as const, keycode: 401 },
+			},
+			'1111': {
+				label: 'Model-specific button (observed keycode 1111)',
+				short: { action: 'launch' as const, id: 'com.webos.app.hdmi2' },
+				long: { action: 'replace' as const, keycode: 398 },
+			},
+		},
+	};
+	const before = structuredClone(config);
+
+	assert.equal(migrateDefaultRemoteShortcuts(config), false);
+	assert.deepEqual(config, before);
+});
