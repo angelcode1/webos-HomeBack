@@ -1,0 +1,44 @@
+name: Validate HomeBack
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Install, check and build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare yarn@4.12.0 --activate
+          yarn --version
+      - name: Install dependencies
+        run: yarn install --immutable
+      - name: Verify source
+        run: yarn check:full
+      - name: Build production IPK
+        run: |
+          rm -rf dist
+          yarn build
+      - name: Validate IPK exists
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          APP_ID="$(node -p "require('./package.json').id")"
+          IPK="dist/${APP_ID}_${VERSION}_all.ipk"
+          echo "Expected IPK: $IPK"
+          test -f "$IPK"
