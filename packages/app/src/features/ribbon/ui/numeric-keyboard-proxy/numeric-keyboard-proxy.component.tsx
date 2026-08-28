@@ -60,7 +60,7 @@ export const NumericKeyboardProxy = observer((): JSX.Element | null => {
 	}, [selectKey]);
 
 	useEffect(() => {
-		service.keyboardService.registerOwner('keypad', {
+		return service.keyboardService.registerOwner('keypad', {
 			horizontal: shift => moveSelection(shift < 0 ? 'left' : 'right'),
 			vertical: shift => moveSelection(shift < 0 ? 'up' : 'down'),
 			enter: () => sendKey(selectedKeyRef.current),

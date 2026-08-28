@@ -39,6 +39,7 @@ export class RibbonService {
 	private index: number | null = null;
 	private visibilityTimer: ReturnType<typeof setTimeout> | null = null;
 	private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
+	private remoteHealthTimer: ReturnType<typeof setInterval> | null = null;
 	private visibilityRevision = 0;
 	private hiddenCommitted = START_HIDDEN;
 	private readonly hiddenWaiters = new Set<{
@@ -56,7 +57,7 @@ export class RibbonService {
 	) {
 		makeAutoObservable<
 			RibbonService,
-			'ref' | 'lifecycleManager' | 'hiddenWaiters' | 'autoHideTimer' | 'keyboardService'
+			'ref' | 'lifecycleManager' | 'hiddenWaiters' | 'autoHideTimer' | 'remoteHealthTimer' | 'keyboardService'
 		>(
 			this,
 			{
@@ -64,6 +65,7 @@ export class RibbonService {
 				lifecycleManager: false,
 				hiddenWaiters: false,
 				autoHideTimer: false,
+				remoteHealthTimer: false,
 				keyboardService: false,
 			},
 			{ autoBind: true },
@@ -137,9 +139,15 @@ export class RibbonService {
 		this.launcherService.emitter.on('openDrawer', this.openDrawer);
 		this.launcherService.emitter.on('openNumericKeyboard', this.openNumericKeypad);
 
-		setInterval(() => {
+		this.remoteHealthTimer = setInterval(() => {
 			if (this.visible) void this.refreshRemoteHealth();
 		}, REMOTE_HEALTH_POLL_MS);
+	}
+
+	public dispose(): void {
+		if (this.remoteHealthTimer === null) return;
+		clearInterval(this.remoteHealthTimer);
+		this.remoteHealthTimer = null;
 	}
 
 	public get selectedLaunchPoint(): LaunchPointInstance | null {

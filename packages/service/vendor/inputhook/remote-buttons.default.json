@@ -62,17 +62,6 @@
       }
     },
     "1043": {
-      "label": "Stan button",
-      "short": {
-        "action": "launch",
-        "id": "com.webos.app.hdmi3"
-      },
-      "long": {
-        "action": "replace",
-        "keycode": 399
-      }
-    },
-    "1086": {
       "label": "LG Channels button",
       "short": {
         "action": "launch",
@@ -83,7 +72,7 @@
         "keycode": 400
       }
     },
-    "1111": {
+    "1086": {
       "label": "Alexa button",
       "short": {
         "action": "launch",
@@ -92,6 +81,17 @@
       "long": {
         "action": "replace",
         "keycode": 401
+      }
+    },
+    "1111": {
+      "label": "Model-specific button (observed keycode 1111)",
+      "short": {
+        "action": "launch",
+        "id": "com.webos.app.hdmi2"
+      },
+      "long": {
+        "action": "replace",
+        "keycode": 398
       }
     },
     "1124": {

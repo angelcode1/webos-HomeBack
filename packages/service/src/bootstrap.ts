@@ -3,7 +3,8 @@ import { existsSync, promises as fs } from 'fs';
 import { ServiceError, type Service } from './bus';
 import { APP_ID, SERVICE_ID } from './environment';
 import { getUid, readJson, rescanLunaManifests, writeJson } from './utils';
-import { RemoteInputManager } from './remote-input';
+import { migrateRemoteDefaultsFile } from './remote-default-migration';
+import { REMOTE_CONFIG_PATH, RemoteInputManager } from './remote-input';
 
 type ClientPermissions = Record<string, string[]>;
 
@@ -71,6 +72,7 @@ export class HomeBackBootstrap {
 
 		const permissionResult = await this.ensureClientPermissions();
 		await this.ensureAutostart();
+		await migrateRemoteDefaultsFile(REMOTE_CONFIG_PATH);
 		await this.remoteInput.start();
 
 		return {

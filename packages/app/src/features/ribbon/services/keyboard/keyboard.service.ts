@@ -28,8 +28,11 @@ export class KeyboardService {
 		this.handleKeyUp = this.handleKeyUp.bind(this);
 	}
 
-	public registerOwner(owner: KeyboardOwner, handlers: KeyboardOwnerHandlers): void {
+	public registerOwner(owner: KeyboardOwner, handlers: KeyboardOwnerHandlers): () => void {
 		this.handlers.set(owner, handlers);
+		return () => {
+			if (this.handlers.get(owner) === handlers) this.handlers.delete(owner);
+		};
 	}
 
 	public setOwner(owner: KeyboardOwner): void {

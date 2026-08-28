@@ -82,13 +82,6 @@ const config = (
 					},
 				],
 			},
-			{
-				test: /\.png$/,
-				type: 'asset/resource',
-				generator: {
-					filename: 'assets/[hash][ext]',
-				},
-			},
 		],
 	},
 	performance: {

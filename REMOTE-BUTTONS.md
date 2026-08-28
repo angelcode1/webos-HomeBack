@@ -24,12 +24,13 @@ native hook and will overwrite it when your HomeBack configuration changes:
 HomeBack watches `remote-buttons.json` and normally reloads changes within
 about one second. A reboot is not required for ordinary mapping changes.
 
-> Existing installations keep their current `remote-buttons.json`. The bundled
-> default is used when HomeBack creates the file for the first time.
+> Existing installations keep hand-edited mappings. Starting with HomeBack 0.4.16,
+> shortcut entries that still exactly match older shipped defaults are migrated to the
+> corrected defaults; customized short/long actions are left unchanged.
 
 ## Default configuration
 
-Fresh installs of HomeBack 0.4.15 start with:
+Fresh installs of HomeBack 0.4.16 start with:
 
 ```json
 {
@@ -96,17 +97,6 @@ Fresh installs of HomeBack 0.4.15 start with:
       }
     },
     "1043": {
-      "label": "Stan button",
-      "short": {
-        "action": "launch",
-        "id": "com.webos.app.hdmi3"
-      },
-      "long": {
-        "action": "replace",
-        "keycode": 399
-      }
-    },
-    "1086": {
       "label": "LG Channels button",
       "short": {
         "action": "launch",
@@ -117,7 +107,7 @@ Fresh installs of HomeBack 0.4.15 start with:
         "keycode": 400
       }
     },
-    "1111": {
+    "1086": {
       "label": "Alexa button",
       "short": {
         "action": "launch",
@@ -126,6 +116,17 @@ Fresh installs of HomeBack 0.4.15 start with:
       "long": {
         "action": "replace",
         "keycode": 401
+      }
+    },
+    "1111": {
+      "label": "Model-specific button (observed keycode 1111)",
+      "short": {
+        "action": "launch",
+        "id": "com.webos.app.hdmi2"
+      },
+      "long": {
+        "action": "replace",
+        "keycode": 398
       }
     },
     "1124": {
@@ -144,13 +145,14 @@ physical two-column button block on the tested remote:
 | Netflix | YouTube | USB-C 1 |
 | Prime Video | HDMI 1 | USB-C 2 |
 | Disney+ | HDMI 2 | Red |
-| Stan | HDMI 3 | Green |
-| LG Channels | HDMI 4 | Yellow |
-| Alexa | CDP-30 | Blue |
+| LG Channels (1043) | HDMI 4 | Yellow |
+| Alexa (1086) | Plex (CDP-30) | Blue |
+| Model-specific (1111) | HDMI 2 | Red |
 
 The numeric JSON keys are the physical key codes reported by the TV. They can
 vary between remote models and firmware versions, so treat this file as an
-example as well as the default.
+example as well as the default. Keycode `1111` is retained as a model-specific
+key observed on the tested remote rather than labelled as a standard Alexa key.
 
 ## HOME short press and long press
 
