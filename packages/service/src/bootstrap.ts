@@ -65,6 +65,15 @@ export class HomeBackBootstrap {
 		this.remoteInput = new RemoteInputManager(service);
 	}
 
+	public async startRemoteInput(): Promise<void> {
+		if (getUid() !== 0) {
+			throw new ServiceError('HomeBack helper service is not running as root.', -401);
+		}
+
+		await migrateRemoteDefaultsFile(REMOTE_CONFIG_PATH);
+		await this.remoteInput.start();
+	}
+
 	public async apply(): Promise<{ restartRequired: boolean; permissionFiles: string[] }> {
 		if (getUid() !== 0) {
 			throw new ServiceError('HomeBack helper service is not running as root.', -401);
@@ -72,8 +81,7 @@ export class HomeBackBootstrap {
 
 		const permissionResult = await this.ensureClientPermissions();
 		await this.ensureAutostart();
-		await migrateRemoteDefaultsFile(REMOTE_CONFIG_PATH);
-		await this.remoteInput.start();
+		await this.startRemoteInput();
 
 		return {
 			restartRequired: permissionResult.changed,
