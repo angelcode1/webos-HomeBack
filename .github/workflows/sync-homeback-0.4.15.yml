@@ -34,7 +34,10 @@ jobs:
         run: |
           set -euo pipefail
           test -f .github/homeback-review8/chunk-00.b64
-          cat .github/homeback-review8/chunk-*.b64 | base64 --decode > /tmp/homeback-0.4.15.patch
+          : > /tmp/homeback-0.4.15.patch
+          for chunk in .github/homeback-review8/chunk-*.b64; do
+            base64 --decode "$chunk" >> /tmp/homeback-0.4.15.patch
+          done
           git apply --binary --check /tmp/homeback-0.4.15.patch
           git apply --binary /tmp/homeback-0.4.15.patch
 
