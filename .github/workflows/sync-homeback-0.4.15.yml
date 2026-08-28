@@ -1,33 +1,148 @@
-name: Audit HomeBack 0.4.15 source blobs
+name: Finalize HomeBack 0.4.15 source
 
 on:
   push:
     branches:
       - release-0.4.15-staging
+    paths:
+      - '.github/homeback-final-source/trigger'
+
+permissions:
+  contents: write
 
 jobs:
-  audit:
-    if: github.actor != 'github-actions[bot]'
+  finalize:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout complete repository history
+      - name: Checkout staged source payload
         uses: actions/checkout@v4
         with:
           ref: release-0.4.15-staging
           fetch-depth: 0
 
-      - name: Report exact baseline blobs missing from repository history
+      - name: Validate staged payload and main baseline
         shell: bash
         run: |
           set -euo pipefail
-          missing=0
-          total=0
+          test "$(git rev-parse origin/main)" = 'c6ce410ebc0a6414f23210715d298b8bcf529a94'
+          cp .github/homeback-final-source/expected.manifest /tmp/homeback-expected.manifest
+          test "$(wc -l < /tmp/homeback-expected.manifest | tr -d ' ')" = '153'
+          cat .github/homeback-final-source/chunk-*.b64 > /tmp/homeback-source.b64
+          base64 --decode /tmp/homeback-source.b64 > /tmp/homeback-source.tar.gz
+          echo '51a01235c011f207fa6399658227e653146fb17bd691998f73db4d490932b7e1  /tmp/homeback-source.tar.gz' | sha256sum --check --strict
+
+      - name: Reconstruct exact all-review-fixes source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add --detach /tmp/homeback-final origin/main
+          cd /tmp/homeback-final
+
+          test "$(git hash-object packages/service/vendor/inputhook/libinputhookpp.so)" = 'ed85d2d55dfe51c5a9869fc88d2cb0476121c59a'
+          test "$(git hash-object .github/workflows/release.yml)" = '29ba78622dea0283a3a8e24223ca4e23a1f72fcf'
+          test "$(git hash-object scripts/fix-ipk-installed-size.sh)" = 'c6f17da140488b9967cc1cfdf364196dd0827ce7'
+          test "$(git hash-object scripts/generate-manifest.cjs)" = 'c996512f49cb6ce3adce38006bad31daff1b021b'
+
+          cp -p packages/service/vendor/inputhook/libinputhookpp.so /tmp/libinputhookpp.so
+          cp -p .github/workflows/release.yml /tmp/release.yml
+          cp -p scripts/fix-ipk-installed-size.sh /tmp/fix-ipk-installed-size.sh
+          cp -p scripts/generate-manifest.cjs /tmp/generate-manifest.cjs
+
+          git rm -r -q .
+          git clean -fdx
+          tar -xzf /tmp/homeback-source.tar.gz -C .
+
+          mkdir -p packages/service/vendor/inputhook .github/workflows scripts
+          cp -p /tmp/libinputhookpp.so packages/service/vendor/inputhook/libinputhookpp.so
+          cp -p /tmp/release.yml .github/workflows/release.yml
+          cp -p /tmp/fix-ipk-installed-size.sh scripts/fix-ipk-installed-size.sh
+          cp -p /tmp/generate-manifest.cjs scripts/generate-manifest.cjs
+
           while read -r mode sha path; do
-            total=$((total + 1))
-            if ! git cat-file -e "${sha}^{blob}" 2>/dev/null; then
-              printf 'MISSING %s %s %s\n' "$mode" "$sha" "$path"
-              missing=$((missing + 1))
-            fi
-          done < .github/homeback-sync/expected.manifest
-          echo "BASELINE_TOTAL=$total"
-          echo "MISSING_TOTAL=$missing"
+            test -f "$path" || { echo "missing source file: $path" >&2; exit 1; }
+            actual_sha="$(git hash-object "$path")"
+            test "$actual_sha" = "$sha" || {
+              echo "source content mismatch: $path expected=$sha actual=$actual_sha" >&2
+              exit 1
+            }
+          done < /tmp/homeback-expected.manifest
+
+          test "$(git hash-object packages/service/src/remote-input.ts)" = 'b3574089995c15dd54747e8d5879a6e32f556c00'
+          test "$(node -p "require('./package.json').version")" = '0.4.15'
+          test "$(node -p "require('./packages/app/package.json').name")" = '@homeback/app'
+          test "$(node -p "require('./packages/service/package.json').name")" = '@homeback/service'
+          test "$(node -p "require('./packages/utils/package.json').name")" = '@homeback/utils'
+
+          git add -A
+          while read -r mode sha path; do
+            actual_mode="$(git ls-files -s -- "$path" | awk '{print $1}')"
+            test "$actual_mode" = "$mode" || {
+              echo "source mode mismatch: $path expected=$mode actual=$actual_mode" >&2
+              exit 1
+            }
+          done < /tmp/homeback-expected.manifest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Regenerate and verify Yarn 4.12 lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/homeback-final
+          corepack enable
+          corepack prepare yarn@4.12.0 --activate
+          rm -f yarn.lock
+          yarn install --no-immutable
+          grep -q '"@homeback/app@workspace:packages/app"' yarn.lock
+          grep -q '"@homeback/service@workspace:packages/service"' yarn.lock
+          grep -q '"@homeback/utils@workspace:packages/utils"' yarn.lock
+          if grep -q '@althome/' yarn.lock; then
+            echo 'stale @althome workspace remains in yarn.lock' >&2
+            exit 1
+          fi
+          yarn install --immutable
+          git add yarn.lock
+
+      - name: Verify final tracked tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/homeback-final
+
+          test "$(git hash-object .github/workflows/release.yml)" = '29ba78622dea0283a3a8e24223ca4e23a1f72fcf'
+          test "$(git hash-object scripts/fix-ipk-installed-size.sh)" = 'c6f17da140488b9967cc1cfdf364196dd0827ce7'
+          test "$(git hash-object scripts/generate-manifest.cjs)" = 'c996512f49cb6ce3adce38006bad31daff1b021b'
+
+          awk '{ $1=""; $2=""; sub(/^  */, ""); print }' /tmp/homeback-expected.manifest > /tmp/expected-paths
+          printf '%s\n' \
+            '.github/workflows/release.yml' \
+            'scripts/fix-ipk-installed-size.sh' \
+            'scripts/generate-manifest.cjs' \
+            'yarn.lock' >> /tmp/expected-paths
+          sort -u /tmp/expected-paths -o /tmp/expected-paths
+          git ls-files | sort -u > /tmp/actual-paths
+          test "$(wc -l < /tmp/actual-paths | tr -d ' ')" = '157'
+          diff -u /tmp/expected-paths /tmp/actual-paths
+          git diff --cached --check
+
+      - name: Run checks and production build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/homeback-final
+          yarn check:full
+          yarn build
+
+      - name: Commit validated source as direct child of main
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/homeback-final
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Sync HomeBack 0.4.15 all-review fixes'
+          test "$(git rev-parse HEAD^)" = 'c6ce410ebc0a6414f23210715d298b8bcf529a94'
+          git push --force-with-lease=refs/heads/release-0.4.15-staging:${GITHUB_SHA} origin HEAD:refs/heads/release-0.4.15-staging
