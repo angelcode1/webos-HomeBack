@@ -1,0 +1,111 @@
+name: Repair HomeBack v0.4.20 release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - package.json
+      - scripts/verify-optimized-source.cjs
+      - .github/workflows/release.yml
+      - .github/workflows/repair-v0.4.20.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    name: Repair v0.4.20 tag and release assets
+    if: startsWith(github.event.head_commit.message, 'Repair v0.4.20 release assets')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repaired source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare yarn@4.12.0 --activate
+          yarn --version
+
+      - name: Validate repair target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          test "$VERSION" = "0.4.20"
+          git rev-parse --verify 'refs/tags/v0.4.20^{commit}' >/dev/null
+          gh release view v0.4.20 >/dev/null
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Verify source
+        run: yarn check:full
+
+      - name: Verify publication
+        env:
+          HOMEBACK_NATIVE_REDISTRIBUTION_CONFIRMED: ${{ vars.HOMEBACK_NATIVE_REDISTRIBUTION_CONFIRMED }}
+        run: yarn verify:publication
+
+      - name: Build production IPK
+        run: |
+          rm -rf dist
+          yarn build
+
+      - name: Validate IPK exists
+        run: |
+          APP_ID="$(node -p "require('./package.json').id")"
+          IPK_PATH="dist/${APP_ID}_${VERSION}_all.ipk"
+          test -f "$IPK_PATH"
+          echo "IPK_PATH=$IPK_PATH" >> "$GITHUB_ENV"
+
+      - name: Fix IPK Installed-Size
+        run: bash scripts/fix-ipk-installed-size.sh "$IPK_PATH"
+
+      - name: Generate release metadata
+        run: |
+          sha256sum "$IPK_PATH" > "${IPK_PATH}.sha256"
+          IPK_HASH="$(cut -d' ' -f1 "${IPK_PATH}.sha256")"
+          IPK_NAME="$(basename "$IPK_PATH")"
+          MANIFEST_PATH="com.homebrew.homeback.manifest.json"
+          IPK_HASH="$IPK_HASH" IPK_NAME="$IPK_NAME" MANIFEST_PATH="$MANIFEST_PATH" node scripts/generate-manifest.cjs
+          echo "MANIFEST_PATH=$MANIFEST_PATH" >> "$GITHUB_ENV"
+
+      - name: Move v0.4.20 tag to repaired source
+        run: |
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          TAG_SHA="$(git rev-parse 'refs/tags/v0.4.20^{commit}')"
+          if [ "$TAG_SHA" != "$SOURCE_SHA" ]; then
+            echo "Moving v0.4.20 from $TAG_SHA to $SOURCE_SHA"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -fa v0.4.20 "$SOURCE_SHA" -m "HomeBack 0.4.20"
+            git push --force origin refs/tags/v0.4.20
+          fi
+
+      - name: Upload v0.4.20 release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload v0.4.20 "$IPK_PATH" "${IPK_PATH}.sha256" "$MANIFEST_PATH" --clobber
+          gh release edit v0.4.20 --title "HomeBack 0.4.20"
+
+      - name: Verify published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ASSETS="$(gh release view v0.4.20 --json assets --jq '.assets[].name')"
+          printf '%s\n' "$ASSETS"
+          printf '%s\n' "$ASSETS" | grep -Fx 'com.homebrew.homeback_0.4.20_all.ipk'
+          printf '%s\n' "$ASSETS" | grep -Fx 'com.homebrew.homeback_0.4.20_all.ipk.sha256'
+          printf '%s\n' "$ASSETS" | grep -Fx 'com.homebrew.homeback.manifest.json'
