@@ -1,6 +1,7 @@
 import { comparer, makeAutoObservable, reaction, toJS } from 'mobx';
 
-const KEY = 'althome:settings';
+const KEY = 'homeback:settings';
+const LEGACY_KEY = 'althome:settings';
 const MIN_WHEEL_FACTOR = 0.1;
 const MAX_WHEEL_FACTOR = 8;
 
@@ -39,9 +40,13 @@ export class SettingsService {
 
 	private hydrate(): void {
 		let parsed: unknown;
+		let migrated = false;
 
 		try {
-			parsed = JSON.parse(localStorage.getItem(KEY) ?? '{}');
+			const current = localStorage.getItem(KEY);
+			const serialized = current ?? localStorage.getItem(LEGACY_KEY) ?? '{}';
+			migrated = current === null && serialized !== '{}';
+			parsed = JSON.parse(serialized);
 		} catch (error) {
 			console.warn('Ignoring invalid HomeBack settings JSON:', error);
 			return;
@@ -60,5 +65,7 @@ export class SettingsService {
 		if (Array.isArray(value.order) && value.order.every(item => typeof item === 'string')) {
 			this.order = [...new Set(value.order)];
 		}
+
+		if (migrated) this.saveConfig(this.serialized);
 	}
 }
