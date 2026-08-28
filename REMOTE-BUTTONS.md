@@ -24,9 +24,9 @@ native hook and will overwrite it when your HomeBack configuration changes:
 HomeBack watches `remote-buttons.json` and normally reloads changes within
 about one second. A reboot is not required for ordinary mapping changes.
 
-> Existing installations keep hand-edited mappings. Starting with HomeBack 0.4.16,
-> shortcut entries that still exactly match older shipped defaults are migrated to the
-> corrected defaults; customized short/long actions are left unchanged.
+> Existing installations keep their configured short/long actions. Starting with
+> HomeBack 0.4.16, the three known stale shipped labels are corrected when they still
+> exactly match the old labels; custom labels and actions are left unchanged.
 
 ## Default configuration
 
@@ -100,6 +100,17 @@ Fresh installs of HomeBack 0.4.16 start with:
       "label": "LG Channels button",
       "short": {
         "action": "launch",
+        "id": "com.webos.app.hdmi3"
+      },
+      "long": {
+        "action": "replace",
+        "keycode": 399
+      }
+    },
+    "1086": {
+      "label": "Alexa button",
+      "short": {
+        "action": "launch",
         "id": "com.webos.app.hdmi4"
       },
       "long": {
@@ -107,8 +118,8 @@ Fresh installs of HomeBack 0.4.16 start with:
         "keycode": 400
       }
     },
-    "1086": {
-      "label": "Alexa button",
+    "1111": {
+      "label": "Model-specific button (observed keycode 1111)",
       "short": {
         "action": "launch",
         "id": "cdp-30"
@@ -116,17 +127,6 @@ Fresh installs of HomeBack 0.4.16 start with:
       "long": {
         "action": "replace",
         "keycode": 401
-      }
-    },
-    "1111": {
-      "label": "Model-specific button (observed keycode 1111)",
-      "short": {
-        "action": "launch",
-        "id": "com.webos.app.hdmi2"
-      },
-      "long": {
-        "action": "replace",
-        "keycode": 398
       }
     },
     "1124": {
@@ -137,17 +137,17 @@ Fresh installs of HomeBack 0.4.16 start with:
 }
 ```
 
-The default six shortcut buttons are intentionally ordered the same way as the
-physical two-column button block on the tested remote:
+The default six shortcut mappings remain unchanged; only the stale physical-button
+labels were corrected:
 
 | Physical button | Short press | Long press |
 | --- | --- | --- |
 | Netflix | YouTube | USB-C 1 |
 | Prime Video | HDMI 1 | USB-C 2 |
 | Disney+ | HDMI 2 | Red |
-| LG Channels (1043) | HDMI 4 | Yellow |
-| Alexa (1086) | Plex (CDP-30) | Blue |
-| Model-specific (1111) | HDMI 2 | Red |
+| LG Channels (1043) | HDMI 3 | Green |
+| Alexa (1086) | HDMI 4 | Yellow |
+| Model-specific (1111) | Plex (CDP-30) | Blue |
 
 The numeric JSON keys are the physical key codes reported by the TV. They can
 vary between remote models and firmware versions, so treat this file as an
