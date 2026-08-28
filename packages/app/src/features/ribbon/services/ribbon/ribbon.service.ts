@@ -39,6 +39,7 @@ export class RibbonService {
 	private index: number | null = null;
 	private visibilityTimer: ReturnType<typeof setTimeout> | null = null;
 	private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
+	private remoteHealthInterval: ReturnType<typeof setInterval> | null = null;
 	private visibilityRevision = 0;
 	private hiddenCommitted = START_HIDDEN;
 	private readonly hiddenWaiters = new Set<{
@@ -56,7 +57,7 @@ export class RibbonService {
 	) {
 		makeAutoObservable<
 			RibbonService,
-			'ref' | 'lifecycleManager' | 'hiddenWaiters' | 'autoHideTimer' | 'keyboardService'
+			'ref' | 'lifecycleManager' | 'hiddenWaiters' | 'autoHideTimer' | 'remoteHealthInterval' | 'keyboardService'
 		>(
 			this,
 			{
@@ -64,6 +65,7 @@ export class RibbonService {
 				lifecycleManager: false,
 				hiddenWaiters: false,
 				autoHideTimer: false,
+				remoteHealthInterval: false,
 				keyboardService: false,
 			},
 			{ autoBind: true },
@@ -137,7 +139,7 @@ export class RibbonService {
 		this.launcherService.emitter.on('openDrawer', this.openDrawer);
 		this.launcherService.emitter.on('openNumericKeyboard', this.openNumericKeypad);
 
-		setInterval(() => {
+		this.remoteHealthInterval = setInterval(() => {
 			if (this.visible) void this.refreshRemoteHealth();
 		}, REMOTE_HEALTH_POLL_MS);
 	}
@@ -276,6 +278,27 @@ export class RibbonService {
 			};
 			this.hiddenWaiters.add(waiter);
 		});
+	}
+
+	public dispose(): void {
+		if (this.remoteHealthInterval) {
+			clearInterval(this.remoteHealthInterval);
+			this.remoteHealthInterval = null;
+		}
+		if (this.visibilityTimer) {
+			clearTimeout(this.visibilityTimer);
+			this.visibilityTimer = null;
+		}
+		if (this.autoHideTimer) {
+			clearTimeout(this.autoHideTimer);
+			this.autoHideTimer = null;
+		}
+		this.keyboardService.unsubscribe();
+		this.keyboardService.unregisterOwner('ribbon');
+		this.lifecycleManager.emitter.off('relaunch', this.toggle);
+		this.lifecycleManager.emitter.off('requestHide', this.hide);
+		this.launcherService.emitter.off('openDrawer', this.openDrawer);
+		this.launcherService.emitter.off('openNumericKeyboard', this.openNumericKeypad);
 	}
 
 	private get mounted(): boolean {
