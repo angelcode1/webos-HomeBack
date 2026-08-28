@@ -80,31 +80,31 @@ test('top-level native replace retains the wider uinput keycode space', () => {
 });
 
 
-test('bundled shortcut defaults use corrected labels and requested action pairs', () => {
+test('bundled shortcut defaults correct labels without changing configured actions', () => {
 	const defaults = JSON.parse(fs.readFileSync(defaultsPath, 'utf8'));
 	assert.deepEqual(defaults.keys['1043'], {
 		label: 'LG Channels button',
-		short: { action: 'launch', id: 'com.webos.app.hdmi4' },
-		long: { action: 'replace', keycode: 400 },
+		short: { action: 'launch', id: 'com.webos.app.hdmi3' },
+		long: { action: 'replace', keycode: 399 },
 	});
 	assert.deepEqual(defaults.keys['1086'], {
 		label: 'Alexa button',
-		short: { action: 'launch', id: 'cdp-30' },
-		long: { action: 'replace', keycode: 401 },
+		short: { action: 'launch', id: 'com.webos.app.hdmi4' },
+		long: { action: 'replace', keycode: 400 },
 	});
 	assert.deepEqual(defaults.keys['1111'], {
 		label: 'Model-specific button (observed keycode 1111)',
-		short: { action: 'launch', id: 'com.webos.app.hdmi2' },
-		long: { action: 'replace', keycode: 398 },
+		short: { action: 'launch', id: 'cdp-30' },
+		long: { action: 'replace', keycode: 401 },
 	});
 });
 
-test('default shortcut migration moves long press with short press and preserves custom entries', () => {
+test('default shortcut migration corrects labels only and preserves actions', () => {
 	const config = {
 		version: 1 as const,
 		keys: {
 			'1043': {
-				label: 'Custom physical label',
+				label: 'Stan button',
 				longPressMs: 900,
 				short: { action: 'launch' as const, id: 'com.webos.app.hdmi3' },
 				long: { action: 'replace' as const, keycode: 399 },
@@ -124,10 +124,10 @@ test('default shortcut migration moves long press with short press and preserves
 
 	assert.equal(migrateDefaultRemoteShortcuts(config), true);
 	assert.deepEqual(config.keys['1043'], {
-		label: 'Custom physical label',
+		label: 'LG Channels button',
 		longPressMs: 900,
-		short: { action: 'launch', id: 'com.webos.app.hdmi4' },
-		long: { action: 'replace', keycode: 400 },
+		short: { action: 'launch', id: 'com.webos.app.hdmi3' },
+		long: { action: 'replace', keycode: 399 },
 	});
 	assert.deepEqual(config.keys['1086'], {
 		label: 'Custom mapping',
@@ -136,7 +136,7 @@ test('default shortcut migration moves long press with short press and preserves
 	});
 	assert.deepEqual(config.keys['1111'], {
 		label: 'Model-specific button (observed keycode 1111)',
-		short: { action: 'launch', id: 'com.webos.app.hdmi2' },
-		long: { action: 'replace', keycode: 398 },
+		short: { action: 'launch', id: 'cdp-30' },
+		long: { action: 'replace', keycode: 401 },
 	});
 });
