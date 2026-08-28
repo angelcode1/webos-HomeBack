@@ -1,5 +1,5 @@
 {
-  "name": "@althome/utils",
+  "name": "@homeback/utils",
   "private": true,
   "type": "module",
   "exports": "./index.ts",
