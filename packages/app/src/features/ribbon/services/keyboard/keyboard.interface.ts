@@ -1,11 +1,12 @@
-type Shift = -1 | 1;
+export type Shift = -1 | 1;
+export type KeyboardOwner = 'ribbon' | 'drawer' | 'keypad';
+export type RemoteDigit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
 
-export type KeyboardEvents = {
-	enter: void;
-	hold: void;
-	shiftX: Shift;
-	shiftY: Shift;
-	up: void;
-	down: void;
-	back: void;
+export type KeyboardOwnerHandlers = {
+	horizontal?: (shift: Shift) => void;
+	vertical?: (shift: Shift) => void;
+	enter?: () => void;
+	hold?: () => void;
+	back?: () => void;
+	digit?: (digit: RemoteDigit) => void;
 };

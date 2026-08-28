@@ -1,5 +1,6 @@
-import { makeAutoObservable, observable, reaction, runInAction } from 'mobx';
+import { makeAutoObservable, reaction, runInAction } from 'mobx';
 
+import { APPLICATION_MANAGER_URI } from 'shared/api/common';
 import { luna, LunaTopic } from 'shared/services/luna';
 import type { LaunchPointInput } from '../../api/launch-point.interface';
 import {
@@ -19,11 +20,11 @@ type IconResponse = {
 };
 
 export class AppManagerProvider implements LaunchPointsProvider {
-	public launchPoints: LaunchPointInput[] = observable.array([]);
+	public launchPoints: LaunchPointInput[] = [];
 	public state: ProviderState = 'loading';
 
 	private readonly topic = new LunaTopic<AppManagerMessage>(
-		'luna://com.webos.service.applicationManager/listLaunchPoints',
+		`${APPLICATION_MANAGER_URI}/listLaunchPoints`,
 	);
 	private generation = 0;
 	private readonly iconRevision = new Map<string, number>();
@@ -66,6 +67,8 @@ export class AppManagerProvider implements LaunchPointsProvider {
 		if ('launchPoints' in message) {
 			const generation = ++this.generation;
 			this.iconRevision.clear();
+			// Discard stale full-refresh work before queueing the new generation.
+			this.iconQueue.length = 0;
 
 			const raw = message.launchPoints.filter(
 				lp => lp.id !== process.env.APP_ID && !INPUT_APP_ID.test(lp.id),

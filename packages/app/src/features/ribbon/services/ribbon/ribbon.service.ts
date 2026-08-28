@@ -1,25 +1,44 @@
 import { makeAutoObservable, observable, reaction, when } from 'mobx';
 
+import { Intent, parseActivateType } from 'shared/api/common';
 import type { LaunchPointInstance } from 'shared/services/launcher';
 import { LauncherService } from 'shared/services/launcher';
 import { LifecycleManagerService } from 'shared/services/lifecycle-manager';
+import { luna } from 'shared/services/luna';
 
 import { AppDrawerService } from '../app-drawer';
 import { KeyboardService } from '../keyboard';
 import { ScrollService } from '../scroll';
+import { RIBBON_AUTO_HIDE_MS } from './ribbon.lib';
 
 const VISIBILITY_TRANSITION_MS = 500;
 const HIDE_WAIT_TIMEOUT_MS = 2_000;
-const START_HIDDEN = webOSSystem.launchReason === 'preload';
+const REMOTE_HEALTH_POLL_MS = 5_000;
+const INITIAL_ACTIVATION = parseActivateType(webOSSystem.launchParams);
+const START_HIDDEN =
+	webOSSystem.launchReason === 'preload' &&
+	INITIAL_ACTIVATION.intent !== Intent.ShowHomeBack &&
+	INITIAL_ACTIVATION.activateType !== 'home';
+
+type RemoteStatusResponse = {
+	returnValue: true;
+	status: {
+		legacyInputHookDetected?: boolean;
+		blockedHooks?: Array<{ name?: string; reason?: string; recovery?: string }>;
+	};
+};
 
 export class RibbonService {
 	public visible = false;
 	public moving = false;
 	public deleteFocused = false;
+	public numericKeypadVisible = false;
+	public remoteWarning: string | null = null;
 
 	private ref: HTMLElement | null = null;
 	private index: number | null = null;
 	private visibilityTimer: ReturnType<typeof setTimeout> | null = null;
+	private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
 	private visibilityRevision = 0;
 	private hiddenCommitted = START_HIDDEN;
 	private readonly hiddenWaiters = new Set<{
@@ -33,20 +52,31 @@ export class RibbonService {
 		public readonly scrollService: ScrollService,
 		public readonly appDrawerService: AppDrawerService,
 		private readonly lifecycleManager: LifecycleManagerService,
-		keyboardService: KeyboardService,
+		public readonly keyboardService: KeyboardService,
 	) {
 		makeAutoObservable<
 			RibbonService,
-			'ref' | 'lifecycleManager' | 'hiddenWaiters'
+			'ref' | 'lifecycleManager' | 'hiddenWaiters' | 'autoHideTimer' | 'keyboardService'
 		>(
 			this,
 			{
 				ref: observable.ref,
 				lifecycleManager: false,
 				hiddenWaiters: false,
+				autoHideTimer: false,
+				keyboardService: false,
 			},
 			{ autoBind: true },
 		);
+
+		this.scrollService.setInteractionHandler(this.noteInteraction);
+		keyboardService.registerOwner('ribbon', {
+			horizontal: this.handleShift,
+			vertical: this.handleVertical,
+			enter: this.handleEnter,
+			hold: this.handleHold,
+			back: this.handleBack,
+		});
 
 		lifecycleManager.bindVisibilityController({
 			isVisible: () => this.visible,
@@ -73,16 +103,24 @@ export class RibbonService {
 				this.moving = false;
 				this.deleteFocused = false;
 				this.appDrawerService.visible = false;
+				if (!visible) this.numericKeypadVisible = false;
 
-				if (visible) keyboardService.subscribe();
-				else keyboardService.unsubscribe();
+				if (visible) {
+					keyboardService.subscribe(document, true);
+					void this.refreshRemoteHealth();
+				} else {
+					keyboardService.unsubscribe();
+				}
 			},
 		);
 
+		// One UI-state reaction owns scroll routing, key ownership and auto-hide.
 		reaction(
-			() => [this.visible, this.appDrawerService.visible] as const,
-			([visible, drawerVisible]) => {
-				this.scrollService.enabled = visible && !drawerVisible;
+			() => [this.visible, this.moving, this.appDrawerService.visible, this.numericKeypadVisible] as const,
+			([visible, _moving, drawerVisible, keypadVisible]) => {
+				this.scrollService.enabled = visible && !drawerVisible && !keypadVisible;
+				keyboardService.setOwner(keypadVisible ? 'keypad' : drawerVisible ? 'drawer' : 'ribbon');
+				this.scheduleAutoHide();
 			},
 			{ fireImmediately: true },
 		);
@@ -94,15 +132,14 @@ export class RibbonService {
 			},
 		);
 
-		keyboardService.emitter.on('shiftX', this.handleShift);
-		keyboardService.emitter.on('enter', this.handleEnter);
-		keyboardService.emitter.on('hold', this.handleHold);
-		keyboardService.emitter.on('up', this.handleUp);
-		keyboardService.emitter.on('down', this.handleDown);
-		keyboardService.emitter.on('back', this.handleBack);
 		lifecycleManager.emitter.on('relaunch', this.toggle);
 		lifecycleManager.emitter.on('requestHide', this.hide);
 		this.launcherService.emitter.on('openDrawer', this.openDrawer);
+		this.launcherService.emitter.on('openNumericKeyboard', this.openNumericKeypad);
+
+		setInterval(() => {
+			if (this.visible) void this.refreshRemoteHealth();
+		}, REMOTE_HEALTH_POLL_MS);
 	}
 
 	public get selectedLaunchPoint(): LaunchPointInstance | null {
@@ -112,13 +149,42 @@ export class RibbonService {
 	}
 
 	public get canMoveEditingLeft(): boolean {
-		return this.moving && this.index !== null && this.index > 0;
+		if (!this.moving) return false;
+		const selected = this.selectedLaunchPoint;
+		if (!selected || selected.builtin) return false;
+		return this.launcherService.visible.filter(item => !item.builtin).indexOf(selected) > 0;
 	}
 
 	public get canMoveEditingRight(): boolean {
-		if (!this.moving || this.index === null) return false;
-		const editable = this.launcherService.visible.filter(lp => !lp.builtin);
-		return this.index < editable.length - 1;
+		if (!this.moving) return false;
+		const selected = this.selectedLaunchPoint;
+		if (!selected || selected.builtin) return false;
+		const editable = this.launcherService.visible.filter(item => !item.builtin);
+		const editableIndex = editable.indexOf(selected);
+		return editableIndex >= 0 && editableIndex < editable.length - 1;
+	}
+
+	public get warningText(): string | null {
+		if (this.remoteWarning) return this.remoteWarning;
+		if (this.launcherService.providerErrorCount > 0) {
+			return 'Some launcher sources are unavailable. Reopen HomeBack or check system services.';
+		}
+		return null;
+	}
+
+	public noteInteraction(): void {
+		this.scheduleAutoHide();
+	}
+
+	public openNumericKeypad(): void {
+		this.finishEditing();
+		this.appDrawerService.visible = false;
+		this.numericKeypadVisible = true;
+	}
+
+	public closeNumericKeypad(): void {
+		if (!this.numericKeypadVisible) return;
+		this.numericKeypadVisible = false;
 	}
 
 	public ribbonRef(ref: HTMLElement | null): void {
@@ -127,10 +193,12 @@ export class RibbonService {
 	}
 
 	public focusToLaunchPoint(launchPoint: LaunchPointInstance): void {
+		this.noteInteraction();
 		if (!this.moving) this.index = this.launcherService.visible.indexOf(launchPoint);
 	}
 
 	public beginEditing(launchPoint?: LaunchPointInstance | null): void {
+		this.noteInteraction();
 		const target = launchPoint ?? this.selectedLaunchPoint;
 		if (!target || target.builtin) return;
 
@@ -143,22 +211,25 @@ export class RibbonService {
 	}
 
 	public finishEditing(): void {
+		this.noteInteraction();
 		if (!this.moving) return;
 		this.moving = false;
 		this.deleteFocused = false;
 	}
 
 	public focusDeleteControl(): void {
+		this.noteInteraction();
 		if (this.moving) this.deleteFocused = true;
 	}
 
 	public focusMoveControl(): void {
+		this.noteInteraction();
 		if (this.moving) this.deleteFocused = false;
 	}
 
 	public moveEditing(shift: number): void {
-		if (!this.moving || this.index === null || (shift !== -1 && shift !== 1)) return;
-
+		this.noteInteraction();
+		if (!this.moving || (shift !== -1 && shift !== 1)) return;
 		const launchPoint = this.selectedLaunchPoint;
 		if (!launchPoint || launchPoint.builtin) return;
 
@@ -168,12 +239,12 @@ export class RibbonService {
 		if (from < 0 || to < 0 || to >= editable.length) return;
 
 		launchPoint.move(shift);
-		this.index = to;
+		this.index = this.launcherService.visible.indexOf(launchPoint);
 	}
 
 	public removeEditingLaunchPoint(): void {
+		this.noteInteraction();
 		if (!this.moving) return;
-
 		const launchPoint = this.selectedLaunchPoint;
 		if (!launchPoint || launchPoint.builtin) return;
 
@@ -181,7 +252,6 @@ export class RibbonService {
 		launchPoint.hide();
 		this.moving = false;
 		this.deleteFocused = false;
-
 		const max = this.launcherService.visible.length - 1;
 		this.index = max >= 0 ? Math.min(oldIndex, max) : null;
 	}
@@ -192,9 +262,7 @@ export class RibbonService {
 
 	public async waitUntilHidden(): Promise<void> {
 		if (!this.visible && this.hiddenCommitted) return;
-
 		await when(() => !this.visible);
-
 		if (this.hiddenCommitted) return;
 
 		await new Promise<void>((resolve, reject) => {
@@ -220,12 +288,36 @@ export class RibbonService {
 
 	private openDrawer(): void {
 		this.finishEditing();
+		this.numericKeypadVisible = false;
 		this.appDrawerService.visible = true;
+	}
+
+	private scheduleAutoHide(): void {
+		if (this.autoHideTimer) {
+			clearTimeout(this.autoHideTimer);
+			this.autoHideTimer = null;
+		}
+
+		if (
+			!this.visible ||
+			this.moving ||
+			this.appDrawerService.visible ||
+			this.numericKeypadVisible
+		) return;
+
+		this.autoHideTimer = setTimeout(() => {
+			this.autoHideTimer = null;
+			if (
+				this.visible &&
+				!this.moving &&
+				!this.appDrawerService.visible &&
+				!this.numericKeypadVisible
+			) this.visible = false;
+		}, RIBBON_AUTO_HIDE_MS);
 	}
 
 	private scheduleVisibilityCommit(visible: boolean): void {
 		if (this.visibilityTimer) clearTimeout(this.visibilityTimer);
-
 		const revision = ++this.visibilityRevision;
 		if (visible) this.hiddenCommitted = false;
 
@@ -257,15 +349,15 @@ export class RibbonService {
 		}
 	}
 
-	private handleUp(): void {
-		if (this.moving) this.focusDeleteControl();
-	}
-
-	private handleDown(): void {
-		if (this.moving) this.focusMoveControl();
+	private handleVertical(shift: number): void {
+		this.noteInteraction();
+		if (!this.moving) return;
+		if (shift < 0) this.focusDeleteControl();
+		else this.focusMoveControl();
 	}
 
 	private handleShift(shift: number): void {
+		this.noteInteraction();
 		if (this.index === null) {
 			this.focusToFirstVisibleNode();
 			return;
@@ -281,6 +373,7 @@ export class RibbonService {
 	}
 
 	private handleEnter(): void {
+		this.noteInteraction();
 		if (this.moving) {
 			if (this.deleteFocused) this.removeEditingLaunchPoint();
 			else this.finishEditing();
@@ -293,11 +386,36 @@ export class RibbonService {
 	}
 
 	private handleHold(): void {
+		this.noteInteraction();
 		this.beginEditing(this.selectedLaunchPoint);
 	}
 
 	private handleBack(): void {
+		this.noteInteraction();
 		if (this.moving) this.finishEditing();
 		else this.visible = false;
+	}
+
+	private async refreshRemoteHealth(): Promise<void> {
+		try {
+			const response = await luna<RemoteStatusResponse>(
+				`luna://${process.env.SERVICE_ID}/remote/status`,
+			);
+			if (response.status.legacyInputHookDetected) {
+				this.remoteWarning = 'Another input hook is active. Reboot after removing the conflicting hook.';
+				return;
+			}
+
+			const blocked = (response.status.blockedHooks ?? []).find(item =>
+				item.reason === 'foreign-hook' ||
+				item.reason === 'injection-failed' ||
+				item.reason === 'homeback-log-missing',
+			);
+			this.remoteWarning = blocked
+				? `Remote hook issue${blocked.name ? ` (${blocked.name})` : ''}: ${blocked.recovery ?? 'reboot and check HomeBack diagnostics.'}`
+				: null;
+		} catch (error) {
+			if (__DEV__) console.warn('Unable to read HomeBack remote-input health:', error);
+		}
 	}
 }

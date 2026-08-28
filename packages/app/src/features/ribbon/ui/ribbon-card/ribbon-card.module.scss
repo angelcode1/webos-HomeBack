@@ -44,6 +44,7 @@ $card-height: 184px;
 		transform: skewX(-9.5deg);
 
 		background-color: var(--card-color);
+		opacity: 0.85;
 	}
 }
 
@@ -198,7 +199,7 @@ $card-height: 184px;
 	height: 216px;
 }
 
-.moving {
+.card.moving {
 	transform: translate(8.7px, -26px) scale(1.045);
 	height: 216px;
 }

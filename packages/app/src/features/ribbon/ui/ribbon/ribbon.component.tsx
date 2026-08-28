@@ -12,6 +12,11 @@ export const Ribbon = observer((): JSX.Element => {
 
 	return (
 		<>
+			{service.visible && service.warningText && (
+				<div className={s.warning} role='status'>
+					{service.warningText}
+				</div>
+			)}
 			<div
 				ref={service.ribbonRef}
 				className={`${s.group} ${service.visible ? s.visible : ''}`}

@@ -16,7 +16,7 @@ export const RibbonAppDrawer = observer((): JSX.Element => {
 			<div className={s.backdrop} onClick={() => { service.appDrawerService.visible = false; }} />
 			<div className={s.drawer}>
 				<h1 className={s.header}>Apps</h1>
-				<RibbonAppDrawerList />
+				{active && <RibbonAppDrawerList />}
 			</div>
 		</div>,
 		document.body,

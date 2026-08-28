@@ -1,10 +1,3 @@
-interface InputRegion {
-	x: number;
-	y: number;
-	width: number;
-	height: number;
-}
-
 declare global {
 	class PalmServiceBridge {
 		constructor(serviceId?: string);
@@ -40,11 +33,6 @@ declare global {
 			 * Set keyboard focus
 			 */
 			setFocus(focus: boolean): void;
-
-			/**
-			 * Set floating window input region
-			 */
-			setInputRegion(regions: [region: InputRegion]): void;
 		};
 	}
 

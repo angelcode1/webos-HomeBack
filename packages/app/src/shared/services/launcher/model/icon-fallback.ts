@@ -8,18 +8,9 @@ const escapeXml = (value: string): string => value
 	.replace(/"/g, '&quot;')
 	.replace(/'/g, '&apos;');
 
-export const preferredIconPath = (snapshot: {
-	mediumLargeIcon?: string;
-	largeIcon?: string;
-	extraLargeIcon?: string;
-	icon?: string;
-}): string =>
-	snapshot.mediumLargeIcon ||
-	snapshot.largeIcon ||
-	snapshot.extraLargeIcon ||
-	snapshot.icon ||
-	'';
-
+/** Raw icon paths are used only by AppManagerProvider before snapshots are
+ * normalized to data URLs. Keep the full priority list for asynchronous
+ * /readIcon hydration. */
 export const preferredIconPaths = (snapshot: {
 	mediumLargeIcon?: string;
 	largeIcon?: string;
@@ -50,9 +41,3 @@ export const genericInputIcon = svgIcon([
 	'<path d="M31 45h30M54 35l11 10-11 10" fill="none" stroke="white" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>',
 	'</svg>',
 ].join(''));
-
-export const normalizeExternalIcon = (source: string): string => {
-	if (!source) return '';
-	if (/^(?:data|blob|https?|file):/i.test(source)) return source;
-	return source.startsWith('/') ? `file://${source}` : source;
-};

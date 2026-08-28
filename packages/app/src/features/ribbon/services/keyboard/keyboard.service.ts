@@ -1,24 +1,49 @@
-import mitt from 'mitt';
-
-import type { KeyboardEvents } from './keyboard.interface';
+import type {
+	KeyboardOwner,
+	KeyboardOwnerHandlers,
+	RemoteDigit,
+	Shift,
+} from './keyboard.interface';
 import { ArrowKey, HOLD_THRESHOLD_MS } from './keyboard.lib';
 
 type KeyboardTarget = HTMLElement | Document;
 
+/**
+ * Single remote-key dispatcher for the HomeBack surface.
+ *
+ * Exactly one owner (ribbon, drawer or keypad) receives semantic key events at
+ * a time, avoiding capture-order dependencies between multiple document
+ * listeners.
+ */
 export class KeyboardService {
 	private ref: KeyboardTarget | null = null;
-	private capture = false;
+	private capture = true;
 	private enterTimer: ReturnType<typeof setTimeout> | null = null;
 	private holdFired = false;
-
-	public emitter = mitt<KeyboardEvents>();
+	private owner: KeyboardOwner = 'ribbon';
+	private readonly handlers = new Map<KeyboardOwner, KeyboardOwnerHandlers>();
 
 	public constructor() {
 		this.handleKeyDown = this.handleKeyDown.bind(this);
 		this.handleKeyUp = this.handleKeyUp.bind(this);
 	}
 
-	public subscribe(ref: KeyboardTarget = document.body, capture = false): void {
+	public registerOwner(owner: KeyboardOwner, handlers: KeyboardOwnerHandlers): void {
+		this.handlers.set(owner, handlers);
+	}
+
+	public setOwner(owner: KeyboardOwner): void {
+		if (this.owner === owner) return;
+		this.owner = owner;
+		this.resetEnterState();
+	}
+
+	public isOwner(owner: KeyboardOwner): boolean {
+		return this.owner === owner;
+	}
+
+	public subscribe(ref: KeyboardTarget = document, capture = true): void {
+		if (this.ref === ref && this.capture === capture) return;
 		this.unsubscribe();
 		this.ref = ref;
 		this.capture = capture;
@@ -31,28 +56,19 @@ export class KeyboardService {
 			this.ref.removeEventListener('keydown', this.handleKeyDown as EventListener, this.capture);
 			this.ref.removeEventListener('keyup', this.handleKeyUp as EventListener, this.capture);
 		}
-
 		this.ref = null;
-		this.capture = false;
 		this.resetEnterState();
 	}
 
-	private isEditableTarget(event: KeyboardEvent): boolean {
-		const target = event.target;
-		return (
-			target instanceof HTMLInputElement ||
-			target instanceof HTMLTextAreaElement ||
-			(target instanceof HTMLElement && target.isContentEditable)
-		);
+	private get activeHandlers(): KeyboardOwnerHandlers {
+		return this.handlers.get(this.owner) ?? {};
 	}
 
 	private debug(event: KeyboardEvent): void {
 		if (!__DEV__) return;
-		const target = event.target as HTMLElement | null;
 		console.info(
-			`[HomeBackKeyDBG] type=${event.type} key=${event.key} code=${event.code}` +
-				` keyCode=${event.keyCode} which=${event.which} repeat=${event.repeat}` +
-				` target=${target?.tagName ?? '<none>'} capture=${this.capture}`,
+			`[HomeBackKeyDBG] type=${event.type} owner=${this.owner} key=${event.key} code=${event.code}` +
+				` keyCode=${event.keyCode} which=${event.which} repeat=${event.repeat}`,
 		);
 	}
 
@@ -62,13 +78,8 @@ export class KeyboardService {
 	}
 
 	private isEnter(event: KeyboardEvent): boolean {
-		return (
-			event.key === 'Enter' ||
-			event.keyCode === 13 ||
-			event.which === 13
-		);
+		return event.key === 'Enter' || event.keyCode === 13 || event.which === 13;
 	}
-
 
 	private isBack(event: KeyboardEvent): boolean {
 		return (
@@ -87,7 +98,6 @@ export class KeyboardService {
 			case ArrowKey.Down: return ArrowKey.Down;
 			default: break;
 		}
-
 		switch (event.keyCode || event.which) {
 			case 37: return ArrowKey.Left;
 			case 38: return ArrowKey.Up;
@@ -97,52 +107,62 @@ export class KeyboardService {
 		}
 	}
 
+	private remoteDigit(event: KeyboardEvent): RemoteDigit | null {
+		if (event.key && /^[0-9]$/.test(event.key)) return event.key as RemoteDigit;
+		const code = event.keyCode || event.which || 0;
+		if (code >= 48 && code <= 57) return String(code - 48) as RemoteDigit;
+		if (code >= 96 && code <= 105) return String(code - 96) as RemoteDigit;
+		return null;
+	}
+
 	private handleKeyDown(event: KeyboardEvent): void {
 		this.debug(event);
-		if (this.isEditableTarget(event)) return;
-
 		const arrow = this.arrowKey(event);
 		const enter = this.isEnter(event);
 		const back = this.isBack(event);
-		if (!arrow && !enter && !back) return;
+		const digit = this.owner === 'keypad' ? this.remoteDigit(event) : null;
+		if (!arrow && !enter && !back && !digit) return;
 
 		this.consume(event);
 		if (back) {
-			this.emitter.emit('back');
+			if (!event.repeat) this.activeHandlers.back?.();
+			return;
+		}
+		if (digit) {
+			if (!event.repeat) this.activeHandlers.digit?.(digit);
 			return;
 		}
 		if (enter) {
-			this.handleEnterKeyDown(event);
+			if (this.owner === 'ribbon') this.handleRibbonEnterKeyDown(event);
+			else if (!event.repeat) this.activeHandlers.enter?.();
 			return;
 		}
-		if (arrow) this.handleArrowKeyDown(arrow);
+		if (arrow && !event.repeat) this.handleArrowKeyDown(arrow);
 	}
 
 	private handleKeyUp(event: KeyboardEvent): void {
 		this.debug(event);
-		if (this.isEditableTarget(event) || !this.isEnter(event)) return;
+		const handled = this.arrowKey(event) || this.isEnter(event) || this.isBack(event) ||
+			(this.owner === 'keypad' && this.remoteDigit(event));
+		if (!handled) return;
 		this.consume(event);
-		this.handleEnterKeyUp();
+		if (this.owner === 'ribbon' && this.isEnter(event)) this.handleRibbonEnterKeyUp();
 	}
 
-	private handleEnterKeyDown(event: KeyboardEvent): void {
+	private handleRibbonEnterKeyDown(event: KeyboardEvent): void {
 		if (event.repeat || this.enterTimer !== null || this.holdFired) return;
 		this.enterTimer = setTimeout(() => {
 			this.enterTimer = null;
 			this.holdFired = true;
-			if (__DEV__) console.info('[HomeBackKeyDBG] HOLD fired');
-			this.emitter.emit('hold');
+			this.activeHandlers.hold?.();
 		}, HOLD_THRESHOLD_MS);
 	}
 
-	private handleEnterKeyUp(): void {
+	private handleRibbonEnterKeyUp(): void {
 		if (this.enterTimer !== null) {
 			clearTimeout(this.enterTimer);
 			this.enterTimer = null;
-			if (!this.holdFired) {
-				if (__DEV__) console.info('[HomeBackKeyDBG] ENTER fired');
-				this.emitter.emit('enter');
-			}
+			if (!this.holdFired) this.activeHandlers.enter?.();
 		}
 		this.holdFired = false;
 	}
@@ -156,13 +176,17 @@ export class KeyboardService {
 	private handleArrowKeyDown(key: ArrowKey): void {
 		switch (key) {
 			case ArrowKey.Left:
-				this.emitter.emit('shiftX', -1); break;
+				this.activeHandlers.horizontal?.(-1 as Shift);
+				break;
 			case ArrowKey.Right:
-				this.emitter.emit('shiftX', 1); break;
+				this.activeHandlers.horizontal?.(1 as Shift);
+				break;
 			case ArrowKey.Up:
-				this.emitter.emit('shiftY', -1); this.emitter.emit('up'); break;
+				this.activeHandlers.vertical?.(-1 as Shift);
+				break;
 			case ArrowKey.Down:
-				this.emitter.emit('shiftY', 1); this.emitter.emit('down'); break;
+				this.activeHandlers.vertical?.(1 as Shift);
+				break;
 		}
 	}
 }

@@ -1,6 +1,8 @@
 import { makeAutoObservable, observable, reaction } from 'mobx';
 import mitt from 'mitt';
 
+import { APPLICATION_MANAGER_URI } from 'shared/api/common';
+
 import { LifecycleManagerService } from '../../lifecycle-manager';
 import { luna } from '../../luna';
 import { SettingsService } from '../../settings';
@@ -54,10 +56,12 @@ export class LauncherService implements LaunchPointActions {
 		);
 
 		reaction(
-			() => this.launchPoints.filter(lp => !lp.builtin).map(lp => lp.launchPointId),
-			validIds => {
-				if (validIds.length === 0) return;
-
+			() => ({
+				settled: this.fulfilled,
+				validIds: this.launchPoints.filter(lp => !lp.builtin).map(lp => lp.launchPointId),
+			}),
+			({ settled, validIds }) => {
+				if (!settled) return;
 				const valid = new Set(validIds);
 				const pruned = this.settingsService.order.filter(id => valid.has(id));
 				if (pruned.length !== this.settingsService.order.length) {
@@ -68,7 +72,13 @@ export class LauncherService implements LaunchPointActions {
 	}
 
 	public get fulfilled(): boolean {
+		// Settled means the launcher has enough information to render. A provider
+		// error is surfaced separately rather than masquerading as healthy.
 		return this.providers.every(provider => provider.state !== 'loading');
+	}
+
+	public get providerErrorCount(): number {
+		return this.providers.filter(provider => provider.state === 'error').length;
 	}
 
 	public get launchPoints(): LaunchPointInstance[] {
@@ -97,12 +107,6 @@ export class LauncherService implements LaunchPointActions {
 		if (builtin && isInternalParams(params)) {
 			switch (params.internalAction) {
 				case 'openDrawer':
-					for (const provider of this.providers) {
-						if (!provider.refresh) continue;
-						void Promise.resolve(provider.refresh()).catch(error => {
-							console.error('Failed to refresh launcher provider:', error);
-						});
-					}
 					this.emitter.emit('openDrawer');
 					return { returnValue: true };
 
@@ -113,25 +117,20 @@ export class LauncherService implements LaunchPointActions {
 				case 'showInputPicker':
 					await this.lifecycleManager.requestHideAndWait();
 					return luna('luna://com.webos.surfacemanager/showInputPicker', {});
-
-				case 'micomKey':
-					await this.lifecycleManager.requestHideAndWait();
-					return luna('luna://com.webos.service.micomservice/sendKeycode', {
-						keycode: params.keycode,
-					});
 			}
 		}
 
 		if (!builtin) this.lifecycleManager.broadcastHide();
 
-		return luna('luna://com.webos.service.applicationManager/launch', {
+		return luna(`${APPLICATION_MANAGER_URI}/launch`, {
 			id: appId,
 			params,
 		});
 	}
 
-	public show({ launchPointId }: LaunchPointInstance): void {
-		if (!this.order.includes(launchPointId)) this.order = [...this.order, launchPointId];
+	public show(launchPoint: LaunchPointInstance): void {
+		if (launchPoint.builtin || this.order.includes(launchPoint.launchPointId)) return;
+		this.order = [...this.order, launchPoint.launchPointId];
 	}
 
 	public hide({ launchPointId }: LaunchPointInstance): void {
@@ -158,7 +157,10 @@ export class LauncherService implements LaunchPointActions {
 	}
 
 	private set order(value: string[]) {
-		this.settingsService.order = value;
+		const nonBuiltinIds = new Set(
+			this.launchPoints.filter(item => !item.builtin).map(item => item.launchPointId),
+		);
+		this.settingsService.order = [...new Set(value)].filter(id => nonBuiltinIds.has(id));
 	}
 
 	private reconcileLaunchPoints(snapshots: LaunchPointInput[]): void {

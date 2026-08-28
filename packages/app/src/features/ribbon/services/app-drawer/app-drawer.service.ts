@@ -24,26 +24,20 @@ export class AppDrawerService {
 			{ autoBind: true },
 		);
 
-		reaction(
-			() => this.ref,
-			ref => {
-				if (ref && this.visible) keyboardService.subscribe(document, true);
-				else keyboardService.unsubscribe();
-			},
-		);
+		keyboardService.registerOwner('drawer', {
+			vertical: this.handleShift,
+			enter: this.handleEnter,
+			back: this.handleBack,
+		});
 
 		reaction(
-			() => this.visible,
-			visible => {
+			() => [this.ref, this.visible] as const,
+			([ref, visible]) => {
 				this.lastWheelShiftAt = 0;
 				this.lastWheelDirection = 0;
-				if (visible && this.ref) {
-					keyboardService.subscribe(document, true);
-					this.ref.focus();
-				} else {
-					keyboardService.unsubscribe();
-				}
+				if (ref && visible) ref.focus();
 			},
+			{ fireImmediately: true },
 		);
 
 		reaction(
@@ -52,10 +46,6 @@ export class AppDrawerService {
 				this.index = length === 0 ? 0 : Math.min(this.index, length - 1);
 			},
 		);
-
-		keyboardService.emitter.on('shiftY', this.handleShift);
-		keyboardService.emitter.on('enter', this.handleEnter);
-		keyboardService.emitter.on('back', this.handleBack);
 	}
 
 	public get items(): LaunchPointInstance[] {
@@ -84,7 +74,6 @@ export class AppDrawerService {
 
 	public handleWheel(deltaY: number): void {
 		if (!this.visible || this.items.length === 0) return;
-
 		const shift = wheelShiftFromDelta(deltaY);
 		if (shift === 0) return;
 

@@ -3,8 +3,7 @@ import type { LaunchPoint } from '../model/launch-point.model';
 export type InternalLaunchParams =
 	| { internalAction: 'openDrawer' }
 	| { internalAction: 'showInputPicker' }
-	| { internalAction: 'openNumericKeyboard' }
-	| { internalAction: 'micomKey'; keycode: 398 | 399 | 400 | 401 };
+	| { internalAction: 'openNumericKeyboard' };
 
 export type LaunchParams = InternalLaunchParams | Record<string, unknown>;
 

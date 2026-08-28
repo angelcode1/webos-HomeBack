@@ -1,5 +1,5 @@
 {
-  "name": "@althome/app",
+  "name": "@homeback/app",
   "private": true,
   "scripts": {
     "lint": "eslint --ext .ts,.tsx,.js ."

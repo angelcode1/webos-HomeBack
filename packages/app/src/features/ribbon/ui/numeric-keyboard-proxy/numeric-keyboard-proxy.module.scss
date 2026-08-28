@@ -1,0 +1,119 @@
+.keypad {
+	position: fixed;
+	z-index: 5000;
+	left: 50%;
+	bottom: 240px;
+
+	width: 330px;
+	padding: 18px 20px 20px;
+
+	transform: translateX(-50%);
+
+	background: rgba(20, 20, 20, 0.88);
+	border: 1px solid rgba(255, 255, 255, 0.18);
+	border-radius: 18px;
+	box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 14px;
+
+	color: rgba(255, 255, 255, 0.92);
+	font-size: 20px;
+	font-weight: 600;
+}
+
+.close {
+	appearance: none;
+	border: 0;
+	background: transparent;
+	color: rgba(255, 255, 255, 0.82);
+	font-size: 28px;
+	line-height: 1;
+	padding: 2px 6px;
+	cursor: pointer;
+}
+
+.grid {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 10px;
+}
+
+.key,
+.colourKey {
+	appearance: none;
+	outline: none;
+	padding: 0;
+	border: 1px solid rgba(255, 255, 255, 0.16);
+	border-radius: 12px;
+
+	cursor: pointer;
+
+	transition:
+		background 100ms ease,
+		transform 100ms ease,
+		border-color 100ms ease,
+		box-shadow 100ms ease;
+}
+
+.key {
+	height: 62px;
+
+	background: rgba(255, 255, 255, 0.12);
+	color: #ffffff;
+	font-size: 30px;
+	font-weight: 600;
+	text-align: center;
+}
+
+.key:hover,
+.selected {
+	background: rgba(255, 255, 255, 0.28);
+	border-color: rgba(255, 255, 255, 0.62);
+	transform: scale(1.045);
+}
+
+.zero {
+	grid-column: 2;
+}
+
+.colourRow {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 10px;
+	margin-top: 10px;
+}
+
+.colourKey {
+	height: 48px;
+}
+
+.red {
+	background: #ef4444;
+}
+
+.green {
+	background: #4ade80;
+}
+
+.yellow {
+	background: #facc15;
+}
+
+.blue {
+	background: #60a5fa;
+}
+
+.colourKey:hover,
+.selectedColour {
+	border-color: #ffffff;
+	box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.72);
+	transform: scale(1.06);
+}

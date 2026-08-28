@@ -1,7 +1,7 @@
 import { makeAutoObservable, reaction } from 'mobx';
 import mitt from 'mitt';
 
-import { Intent, type ActivateType } from 'shared/api/common';
+import { APPLICATION_MANAGER_URI, Intent, type ActivateType } from 'shared/api/common';
 
 import { luna, LunaTopic } from '../../luna';
 import type { LunaMessage } from '../../luna';
@@ -15,7 +15,7 @@ import type {
 export class LifecycleManagerService {
 	public readonly emitter = mitt<LifecycleManagerEvents>();
 	private readonly topic = new LunaTopic<LunaMessage<LifecycleEvent>>(
-		'luna://com.webos.service.applicationManager/getAppLifeEvents',
+		`${APPLICATION_MANAGER_URI}/getAppLifeEvents`,
 	);
 	private visibilityController: VisibilityController | null = null;
 
@@ -103,7 +103,7 @@ export class LifecycleManagerService {
 	}
 
 	private requestSuspense(): void {
-		void luna('luna://com.webos.service.applicationManager/suspense', {
+		void luna(`${APPLICATION_MANAGER_URI}/suspense`, {
 			id: process.env.APP_ID,
 		}).catch(error => console.error('Unable to suspend HomeBack:', error));
 	}

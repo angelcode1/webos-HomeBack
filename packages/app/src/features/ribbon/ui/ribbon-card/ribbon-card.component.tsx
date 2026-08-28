@@ -33,8 +33,7 @@ const EditControl = ({
 }: EditControlProps): JSX.Element => (
 	<span
 		className={className}
-		role='button'
-		aria-label={label}
+		title={label}
 		onMouseEnter={onMouseEnter}
 		onMouseDown={onMouseDown}
 		onClick={onClick}
@@ -115,6 +114,7 @@ export const RibbonCard = observer(
 		}, [clearHoldTimer]);
 
 		const handleClick = useCallback(() => {
+			service.noteInteraction();
 			if (holdFiredRef.current) {
 				holdFiredRef.current = false;
 				return;

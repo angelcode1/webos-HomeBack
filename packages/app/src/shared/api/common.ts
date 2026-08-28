@@ -9,6 +9,8 @@ export interface ActivateType {
 	intent?: Intent | string;
 }
 
+export const APPLICATION_MANAGER_URI = 'luna://com.webos.service.applicationManager';
+
 export const parseActivateType = (serialized: string): ActivateType => {
 	if (!serialized) return {};
 	try {

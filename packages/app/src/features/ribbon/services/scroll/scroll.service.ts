@@ -14,13 +14,15 @@ export class ScrollService {
 
 	private wheelShift = 0;
 	private animationFrame: number | null = null;
+	private interactionHandler: (() => void) | null = null;
 
 	public constructor(private readonly settingsService: SettingsService) {
-		makeAutoObservable<ScrollService, 'container' | 'settingsService'>(
+		makeAutoObservable<ScrollService, 'container' | 'settingsService' | 'interactionHandler'>(
 			this,
 			{
 				container: observable.ref,
 				settingsService: false,
+				interactionHandler: false,
 			},
 			{ autoBind: true },
 		);
@@ -43,6 +45,10 @@ export class ScrollService {
 		);
 
 		document.addEventListener('wheel', this.handleScroll, { passive: false });
+	}
+
+	public setInteractionHandler(handler: (() => void) | null): void {
+		this.interactionHandler = handler;
 	}
 
 	public isAnimating(): boolean {
@@ -113,6 +119,7 @@ export class ScrollService {
 		) return;
 
 		event.preventDefault();
+		this.interactionHandler?.();
 
 		const deltaScale =
 			event.deltaMode === 1

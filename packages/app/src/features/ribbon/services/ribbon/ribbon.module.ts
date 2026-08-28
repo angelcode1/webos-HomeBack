@@ -9,17 +9,16 @@ import { KeyboardService } from '../keyboard';
 import { ScrollService } from '../scroll';
 import { RibbonService } from './ribbon.service';
 
-const ribbonKeyboardService = new KeyboardService();
-const drawerKeyboardService = new KeyboardService();
+const keyboardService = new KeyboardService();
 const scrollService = new ScrollService(settingsService);
-const appDrawerService = new AppDrawerService(launcherService, drawerKeyboardService);
+const appDrawerService = new AppDrawerService(launcherService, keyboardService);
 
 export const ribbonService = new RibbonService(
 	launcherService,
 	scrollService,
 	appDrawerService,
 	lifecycleManagerService,
-	ribbonKeyboardService,
+	keyboardService,
 );
 
 export const useRibbonService = (): RibbonService => ribbonService;

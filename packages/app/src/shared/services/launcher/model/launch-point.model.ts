@@ -5,11 +5,7 @@ import type {
 	LaunchPointActions,
 	LaunchPointInput,
 } from '../api/launch-point.interface';
-import {
-	genericAppIcon,
-	normalizeExternalIcon,
-	preferredIconPath,
-} from './icon-fallback';
+import { genericAppIcon } from './icon-fallback';
 
 export class LaunchPoint {
 	public appId = '';
@@ -52,7 +48,7 @@ export class LaunchPoint {
 	public apply(snapshot: LaunchPointInput): LaunchPoint {
 		const fallbackIcon = genericAppIcon(snapshot.title);
 		this.appId = snapshot.id;
-		this.icon = normalizeExternalIcon(preferredIconPath(snapshot)) || fallbackIcon;
+		this.icon = snapshot.icon || fallbackIcon;
 		this.fallbackIcon = fallbackIcon;
 		this.title = snapshot.title;
 		this.launchPointId = snapshot.launchPointId;

@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
+import { luna } from './shared/services/luna';
 import { App } from './app';
 import { bootstrapHomeBack } from './bootstrap';
 import { hasCompletedSetup, markSetupComplete } from './setup-state';
@@ -41,20 +42,47 @@ const renderBootstrapError = (error: unknown): void => {
 	);
 };
 
-// Setup is visible only until the first successful bootstrap. Persist completion
-// before a one-time restart request so normal reboots never show setup again.
-if (setupComplete) renderApp();
-else renderSetup();
+type RemoteStatusResponse = {
+	returnValue: true;
+	done: true;
+	status: {
+		started?: boolean;
+		nativeOwnershipVerified?: boolean;
+	};
+};
 
-void bootstrapHomeBack(() => markSetupComplete(window.localStorage))
-	.then(state => {
-		if (state === 'restarting') return;
-		renderApp();
-	})
-	.catch(error => {
-		if (appRendered) {
-			console.error('HomeBack background bootstrap failed:', error);
-			return;
-		}
-		renderBootstrapError(error);
-	});
+/**
+ * Normal HOME launches should not replay the privileged bootstrap path. Query
+ * the cheap status endpoint first and only ask the idempotent remote/start path
+ * to reconcile if the helper is not already healthy.
+ */
+const ensureRemoteInput = async (): Promise<void> => {
+	try {
+		const response = await luna<RemoteStatusResponse>(
+			`luna://${process.env.SERVICE_ID}/remote/status`,
+		);
+		if (response.status.started && response.status.nativeOwnershipVerified) return;
+		await luna(`luna://${process.env.SERVICE_ID}/remote/start`);
+	} catch (error) {
+		console.error('HomeBack background remote-input health check failed:', error);
+	}
+};
+
+if (setupComplete) {
+	renderApp();
+	void ensureRemoteInput();
+} else {
+	renderSetup();
+	void bootstrapHomeBack(() => markSetupComplete(window.localStorage))
+		.then(state => {
+			if (state === 'restarting') {
+				// /restartApp is intentionally fire-and-forget in the helper. If SAM
+				// accepts the request but the subsequent relaunch fails, do not strand
+				// this still-running webview on the setup screen indefinitely.
+				setTimeout(renderApp, 3_000);
+				return;
+			}
+			renderApp();
+		})
+		.catch(renderBootstrapError);
+}

@@ -10,11 +10,11 @@
 
   <!-- Reverse-Amazon-smile return arrow restored from the previous HomeBack icon. -->
   <path d="M244 190C237 239 198 270 151 270C104 270 66 244 51 205"
-        fill="none" stroke="#6B6B6B" stroke-width="34" stroke-linecap="round"/>
+        fill="none" stroke="#FF0844" stroke-width="34" stroke-linecap="round"/>
   <path d="M244 190C237 239 198 270 151 270C104 270 66 244 51 205"
-        fill="none" stroke="#FF0844" stroke-width="22" stroke-linecap="round"/>
+        fill="none" stroke="#6B6B6B" stroke-width="22" stroke-linecap="round"/>
   <path d="M51 205L34 237M51 205L86 211"
-        fill="none" stroke="#6B6B6B" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+        fill="none" stroke="#FF0844" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M51 205L34 237M51 205L86 211"
-        fill="none" stroke="#FF0844" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+        fill="none" stroke="#6B6B6B" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
