@@ -62,7 +62,7 @@
       }
     },
     "1043": {
-      "label": "Stan button",
+      "label": "LG Channels button",
       "short": {
         "action": "launch",
         "id": "com.webos.app.hdmi3"
@@ -73,7 +73,7 @@
       }
     },
     "1086": {
-      "label": "LG Channels button",
+      "label": "Alexa button",
       "short": {
         "action": "launch",
         "id": "com.webos.app.hdmi4"
@@ -84,7 +84,7 @@
       }
     },
     "1111": {
-      "label": "Alexa button",
+      "label": "Model-specific button (1111; observed as Alexa on some AU remotes)",
       "short": {
         "action": "launch",
         "id": "cdp-30"
