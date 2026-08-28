@@ -1,24 +1,28 @@
 import { spawn } from 'child_process';
+import type { ChildProcess } from 'child_process';
 import {
 	closeSync,
 	constants as fsConstants,
 	existsSync,
+	fchmodSync,
+	fstatSync,
+	ftruncateSync,
 	openSync,
 	promises as fs,
-	readSync,
-	statSync,
-	truncateSync,
 } from 'fs';
 import { basename, dirname, join } from 'path';
 
 import type { Service } from './bus';
-import { APP_ID, SERVICE_ID, SERVICE_ROOT_DIR } from './environment';
+import { CoalescedTask } from './coalesced-task';
+import { SERVICE_ID, SERVICE_ROOT_DIR } from './environment';
+import { EventLogTailer, MAX_LOG_BYTES } from './event-log-tailer';
+import { RemoteActionRunner } from './remote-action-runner';
+import { parseProcStatStartTime } from './remote-process';
 import {
 	buildNativeKeybinds,
 	isTimedMapping,
 	type RemoteConfig,
 	type RemoteMapping,
-	type SemanticAction,
 	type TimedMapping,
 	validateConfig,
 } from './remote-config';
@@ -44,7 +48,7 @@ const EZINJECT_PATH = join(SERVICE_ROOT_DIR, 'inputhook', 'ezinject');
 const INPUTHOOK_LIBRARY_PATH = join(SERVICE_ROOT_DIR, 'inputhook', 'libinputhookpp.so');
 
 // @invariant: essential-native-ownership
-const TARGET_NAMES = new Set(['RELEASE', ...ESSENTIAL_TARGET_NAMES, 'tvservice', 'testapp']);
+const TARGET_NAMES = new Set([...ESSENTIAL_TARGET_NAMES, 'tvservice']);
 const LEGACY_SERVICE_ID = 'org.webosbrew.inputhook.service';
 const LEGACY_SERVICE_DIRS = [
 	'/media/developer/apps/usr/palm/services/org.webosbrew.inputhook.service',
@@ -55,12 +59,11 @@ const LOG_POLL_MS = 80;
 const PROCESS_SCAN_MS = 2_000;
 const CONFIG_SCAN_MS = 1_000;
 const DEFAULT_LONG_PRESS_MS = 650;
-const MAX_LOG_READ = 256 * 1024;
-const MAX_LOG_BYTES = 2 * 1024 * 1024;
 const ACTION_COOLDOWN_MS = 150;
 const MAX_STUCK_PRESS_GRACE_MS = 5_000;
 const INJECTION_VERIFY_DELAY_MS = 150;
 const INJECTION_VERIFY_ATTEMPTS = 10;
+const INJECTION_WATCHDOG_MS = 15_000;
 
 type ActivePress = {
 	mapping: TimedMapping;
@@ -76,32 +79,19 @@ type LastRemoteKeyEvent = {
 	atMs: number;
 };
 
-type LastRemoteAction = {
-	keycode: number;
-	kind: 'short' | 'long';
-	action: SemanticAction['action'];
-	startedAtMs: number;
-	completedAtMs: number | null;
-	outcome: 'pending' | 'ok' | 'error';
-	error?: string;
-};
-
-type LogCursor = {
-	path: string;
-	offset: number;
-	carry: string;
-};
-
 type TargetSource = 'injected' | 'adopted';
 
 type InjectedTarget = {
 	pid: number;
 	name: string;
+	startTimeTicks: string;
 	logPath: string;
 	injectorLogPath: string;
 	hookPath: string;
 	state: 'injecting' | 'active';
 	source: TargetSource;
+	injectionWatchdog: NodeJS.Timeout | null;
+	injector: ChildProcess | null;
 };
 
 type BlockedHookReason =
@@ -113,6 +103,7 @@ type BlockedHookReason =
 type BlockedHook = {
 	pid: number;
 	name: string;
+	startTimeTicks: string;
 	hookPath: string;
 	reason: BlockedHookReason;
 	recovery: string;
@@ -124,6 +115,7 @@ type BlockedHook = {
 
 type InjectionFailure = {
 	name: string;
+	startTimeTicks: string;
 	failures: number;
 	nextAttemptAt: number;
 	lastError: string;
@@ -132,11 +124,13 @@ type InjectionFailure = {
 type ProcTargetSnapshot = {
 	pid: number;
 	name: string;
+	startTimeTicks: string;
 	mapsReadable: boolean;
 	mappedHookPath: string | null;
 };
 
 type HookInspection = Pick<ProcTargetSnapshot, 'mapsReadable' | 'mappedHookPath'>;
+type TargetIdentity = Pick<ProcTargetSnapshot, 'pid' | 'name' | 'startTimeTicks'>;
 
 const serializeNativeConfig = (config: RemoteConfig): string =>
 	`${JSON.stringify(buildNativeKeybinds(config), null, '\t')}\n`;
@@ -145,46 +139,63 @@ const actionThreshold = (mapping: TimedMapping, config: RemoteConfig): number =>
 	mapping.longPressMs ?? config.defaultLongPressMs ?? DEFAULT_LONG_PRESS_MS;
 
 // @invariant: nofollow-log-permissions
-const createFreshLogFile = async (path: string): Promise<void> => {
-	const handle = await fs.open(
+const createFreshLogFile = (path: string): number => {
+	const fd = openSync(
 		path,
-		fsConstants.O_WRONLY |
+		fsConstants.O_RDWR |
 			fsConstants.O_CREAT |
 			fsConstants.O_TRUNC |
 			fsConstants.O_NOFOLLOW,
 		0o600,
 	);
 	try {
-		await handle.chmod(0o600);
-	} finally {
-		await handle.close();
+		fchmodSync(fd, 0o600);
+		return fd;
+	} catch (error) {
+		closeSync(fd);
+		throw error;
 	}
 };
 
+const configFingerprint = (stat: { mtimeMs: number; size: number; ino: number }): string =>
+	`${stat.mtimeMs}:${stat.size}:${stat.ino}`;
+
 export class RemoteInputManager {
 	private config: RemoteConfig = { version: 1, defaultLongPressMs: DEFAULT_LONG_PRESS_MS, keys: {} };
-	private configMtime = 0;
-	private rejectedConfigMtime = 0;
+	private configFingerprint = '';
+	private rejectedConfigFingerprint = '';
 	private started = false;
 	private readonly targets = new Map<number, InjectedTarget>();
 	private readonly blockedHooks = new Map<number, BlockedHook>();
 	private readonly injectionFailures = new Map<number, InjectionFailure>();
 	private readonly lastObservedTargets = new Map<number, ProcTargetSnapshot>();
+	private readonly processNameCache = new Map<number, string>();
 	private readonly legacyPids = new Set<number>();
 	private legacyMode = false;
-	private readonly logs = new Map<string, LogCursor>();
+	private readonly logTailer: EventLogTailer;
+	private readonly actionRunner: RemoteActionRunner;
 	private readonly activePresses = new Map<number, ActivePress>();
 	private readonly lastActionAt = new Map<number, number>();
 	private lastKeyEvent: LastRemoteKeyEvent | null = null;
-	private lastAction: LastRemoteAction | null = null;
 	private logTimer: NodeJS.Timeout | null = null;
 	private processTimer: NodeJS.Timeout | null = null;
 	private configTimer: NodeJS.Timeout | null = null;
 	private startPromise: Promise<void> | null = null;
-	private scanPromise: Promise<void> | null = null;
-	private rescanRequested = false;
+	private readonly processScans: CoalescedTask<void>;
+	private readonly configReloads: CoalescedTask<boolean>;
 
-	public constructor(private readonly service: Service) {}
+	public constructor(private readonly service: Service) {
+		this.logTailer = new EventLogTailer();
+		this.actionRunner = new RemoteActionRunner(service);
+		this.processScans = new CoalescedTask<void>(
+			() => this.scanProcessesOnce(),
+			() => undefined,
+		);
+		this.configReloads = new CoalescedTask<boolean>(
+			force => this.reloadConfigOnce(force),
+			(current, incoming) => current || incoming,
+		);
+	}
 
 	public async start(): Promise<void> {
 		if (this.started) {
@@ -235,8 +246,8 @@ export class RemoteInputManager {
 			legacyInputHookDetected: this.legacyMode || mappedLegacyPids.length > 0,
 			legacyPids,
 			lastKeyEvent: this.lastKeyEvent,
-			lastAction: this.lastAction,
-			logCursorCount: this.logs.size,
+			lastAction: this.actionRunner.lastAction,
+			logCursorCount: this.logTailer.size,
 		};
 	}
 
@@ -258,7 +269,7 @@ export class RemoteInputManager {
 		await this.scanProcesses();
 
 		this.started = true;
-		this.logTimer = setInterval(() => this.pollLogs(), LOG_POLL_MS);
+		this.logTimer = setInterval(() => this.logTailer.poll(line => this.parseLogLine(line)), LOG_POLL_MS);
 		this.processTimer = setInterval(() => {
 			void this.scanProcesses();
 		}, PROCESS_SCAN_MS);
@@ -309,7 +320,11 @@ export class RemoteInputManager {
 		if (!existsSync(NATIVE_CONFIG_PATH)) await writeFile(NATIVE_CONFIG_PATH, '{}\n', 0o644);
 	}
 
-	private async reloadConfig(force: boolean): Promise<void> {
+	private reloadConfig(force: boolean): Promise<void> {
+		return this.configReloads.request(force);
+	}
+
+	private async reloadConfigOnce(force: boolean): Promise<void> {
 		let stat;
 		try {
 			stat = await fs.lstat(REMOTE_CONFIG_PATH);
@@ -319,15 +334,16 @@ export class RemoteInputManager {
 			return;
 		}
 
+		const fingerprint = configFingerprint(stat);
 		if (!stat.isFile() || stat.isSymbolicLink()) {
 			const error = new Error(`${REMOTE_CONFIG_PATH} must be a regular file, not a symlink.`);
 			if (force) throw error;
-			if (stat.mtimeMs !== this.rejectedConfigMtime) console.error(error.message);
-			this.rejectedConfigMtime = stat.mtimeMs;
+			if (fingerprint !== this.rejectedConfigFingerprint) console.error(error.message);
+			this.rejectedConfigFingerprint = fingerprint;
 			return;
 		}
 
-		if (!force && (stat.mtimeMs === this.configMtime || stat.mtimeMs === this.rejectedConfigMtime)) return;
+		if (!force && (fingerprint === this.configFingerprint || fingerprint === this.rejectedConfigFingerprint)) return;
 
 		try {
 			const parsed = JSON.parse(await fs.readFile(REMOTE_CONFIG_PATH, 'utf8')) as unknown;
@@ -343,11 +359,11 @@ export class RemoteInputManager {
 			if (current !== serialized) await writeFile(NATIVE_CONFIG_PATH, serialized, 0o644);
 
 			this.config = parsed;
-			this.configMtime = stat.mtimeMs;
-			this.rejectedConfigMtime = 0;
+			this.configFingerprint = fingerprint;
+			this.rejectedConfigFingerprint = '';
 			console.log(`Loaded remote button mappings from ${REMOTE_CONFIG_PATH}`);
 		} catch (error) {
-			this.rejectedConfigMtime = stat.mtimeMs;
+			this.rejectedConfigFingerprint = fingerprint;
 			if (force) throw error;
 			console.error('Failed to reload remote button mappings; keeping previous mappings:', error);
 		}
@@ -364,26 +380,58 @@ export class RemoteInputManager {
 			return null;
 		}
 
+		const livePids = new Set<number>();
 		for (const entry of entries) {
 			if (!/^\d+$/.test(entry)) continue;
 			const pid = Number(entry);
-			let name: string;
-			try {
-				name = (await fs.readFile(`/proc/${entry}/comm`, 'utf8')).trim();
-			} catch {
-				continue;
+			livePids.add(pid);
+
+			let name = this.processNameCache.get(pid);
+			if (name === undefined) {
+				try {
+					name = (await fs.readFile(`/proc/${entry}/comm`, 'utf8')).trim();
+					this.processNameCache.set(pid, name);
+				} catch {
+					continue;
+				}
 			}
 			if (!TARGET_NAMES.has(name)) continue;
 
+			const startTimeTicks = await this.readProcessStartTime(pid);
+			if (!startTimeTicks) continue;
+			const previousTarget = this.lastObservedTargets.get(pid);
+			if (previousTarget && previousTarget.startTimeTicks !== startTimeTicks) {
+				// A PID can be recycled without being absent from two-second snapshots.
+				// Never trust the cached comm across an observed identity change.
+				try {
+					name = (await fs.readFile(`/proc/${entry}/comm`, 'utf8')).trim();
+					this.processNameCache.set(pid, name);
+				} catch {
+					continue;
+				}
+				if (!TARGET_NAMES.has(name)) continue;
+			}
 			const inspection = await this.inspectMappedHook(pid);
 			targets.set(pid, {
 				pid,
 				name,
+				startTimeTicks,
 				...inspection,
 			});
 		}
 
+		for (const pid of [...this.processNameCache.keys()]) {
+			if (!livePids.has(pid)) this.processNameCache.delete(pid);
+		}
 		return targets;
+	}
+
+	private async readProcessStartTime(pid: number): Promise<string | null> {
+		try {
+			return parseProcStatStartTime(await fs.readFile(`/proc/${pid}/stat`, 'utf8'));
+		} catch {
+			return null;
+		}
 	}
 
 	private async detectLiveLegacyInputHook(
@@ -413,23 +461,25 @@ export class RemoteInputManager {
 
 		for (const name of TARGET_NAMES) {
 			const path = `/tmp/lginput-hook-${name}.log`;
-			if (!existsSync(path) || this.logs.has(path)) continue;
+			if (!existsSync(path) || this.logTailer.has(path)) continue;
 
-			let offset = 0;
+			let fd: number | null = null;
 			try {
-				offset = statSync(path).size;
-			} catch {
-				// Start from zero.
+				fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+				const stat = fstatSync(fd);
+				if (!stat.isFile()) throw new Error('legacy event log is not a regular file');
+				this.logTailer.add(path, fd, stat.size, false);
+				fd = null; // ownership transferred to EventLogTailer
+				console.log(`Using existing LG Input Hook event log for ${name}`);
+			} catch (error) {
+				if (fd !== null) closeSync(fd);
+				console.warn(`Unable to attach legacy input-hook log ${path}:`, error);
 			}
-			this.logs.set(path, { path, offset, carry: '' });
-			console.log(`Using existing LG Input Hook event log for ${name}`);
 		}
 	}
 
 	private detachLegacyLogs(): void {
-		for (const path of [...this.logs.keys()]) {
-			if (path.startsWith('/tmp/lginput-hook-')) this.logs.delete(path);
-		}
+		this.logTailer.removeWhere(cursor => cursor.path.startsWith('/tmp/lginput-hook-'));
 	}
 
 	private async reconcileLegacyMode(
@@ -460,68 +510,70 @@ export class RemoteInputManager {
 		return false;
 	}
 
-	private async scanProcesses(): Promise<void> {
-		if (this.scanPromise) {
-			this.rescanRequested = true;
-			await this.scanPromise;
-			return;
-		}
-
-		do {
-			this.rescanRequested = false;
-			this.scanPromise = this.scanProcessesOnce();
-			try {
-				await this.scanPromise;
-			} finally {
-				this.scanPromise = null;
-			}
-		} while (this.rescanRequested);
+	private scanProcesses(): Promise<void> {
+		return this.processScans.request(undefined);
 	}
 
 	private async scanProcessesOnce(): Promise<void> {
-		this.sweepActivePresses();
 		const procTargets = await this.scanTargetProcesses();
 		if (!procTargets) return;
 		this.lastObservedTargets.clear();
 		for (const [pid, target] of procTargets) this.lastObservedTargets.set(pid, target);
 
-		const live = new Set(procTargets.keys());
-		await this.pruneDeadProcessState(live);
+		await this.pruneDeadProcessState(procTargets);
 		if (await this.reconcileLegacyMode(procTargets)) return;
 
 		const now = Date.now();
 		for (const target of procTargets.values()) {
-			if (this.targets.has(target.pid)) continue;
+			const existing = this.targets.get(target.pid);
+			if (existing) {
+				if (existing.startTimeTicks === target.startTimeTicks) continue;
+				await this.cleanupTarget(target.pid);
+			}
 
 			const blocked = this.blockedHooks.get(target.pid);
 			if (blocked) {
-				if (now >= blocked.nextRecheckAt) await this.recheckBlockedTarget(target, blocked);
-				continue;
+				if (blocked.startTimeTicks !== target.startTimeTicks) {
+					this.blockedHooks.delete(target.pid);
+				} else {
+					if (now >= blocked.nextRecheckAt) await this.recheckBlockedTarget(target, blocked);
+					continue;
+				}
 			}
 
 			const failure = this.injectionFailures.get(target.pid);
-			if (failure && now < failure.nextAttemptAt) continue;
+			if (failure) {
+				if (failure.startTimeTicks !== target.startTimeTicks) {
+					this.injectionFailures.delete(target.pid);
+				} else if (now < failure.nextAttemptAt) {
+					continue;
+				}
+			}
 			await this.reconcileTarget(target);
 		}
 	}
 
-	private async pruneDeadProcessState(live: ReadonlySet<number>): Promise<void> {
-		for (const pid of [...this.targets.keys()]) {
-			if (!live.has(pid)) await this.cleanupTarget(pid);
+	private async pruneDeadProcessState(
+		procTargets: ReadonlyMap<number, ProcTargetSnapshot>,
+	): Promise<void> {
+		for (const [pid, existing] of [...this.targets.entries()]) {
+			const live = procTargets.get(pid);
+			if (!live || live.startTimeTicks !== existing.startTimeTicks) await this.cleanupTarget(pid);
 		}
-		for (const pid of [...this.blockedHooks.keys()]) {
-			if (!live.has(pid)) this.blockedHooks.delete(pid);
+		for (const [pid, blocked] of [...this.blockedHooks.entries()]) {
+			const live = procTargets.get(pid);
+			if (!live || live.startTimeTicks !== blocked.startTimeTicks) this.blockedHooks.delete(pid);
 		}
-		for (const pid of [...this.injectionFailures.keys()]) {
-			if (!live.has(pid)) this.injectionFailures.delete(pid);
+		for (const [pid, failure] of [...this.injectionFailures.entries()]) {
+			const live = procTargets.get(pid);
+			if (!live || live.startTimeTicks !== failure.startTimeTicks) this.injectionFailures.delete(pid);
 		}
 	}
 
 	private async reconcileTarget(target: ProcTargetSnapshot): Promise<void> {
 		if (!target.mapsReadable) {
 			const changed = this.blockTarget(
-				target.pid,
-				target.name,
+				target,
 				'',
 				'proc-maps-unreadable',
 				'HomeBack could not inspect /proc/<pid>/maps safely. It will retry automatically; do not force reinjection.',
@@ -535,11 +587,11 @@ export class RemoteInputManager {
 		}
 
 		if (target.mappedHookPath) {
-			await this.handleMappedHook(target.pid, target.name, target.mappedHookPath);
+			await this.handleMappedHook(target, target.mappedHookPath);
 			return;
 		}
 
-		await this.inject(target.pid, target.name);
+		await this.inject(target);
 	}
 
 	// @invariant: blocked-target-recheck
@@ -550,19 +602,19 @@ export class RemoteInputManager {
 		if (!target.mapsReadable) return;
 
 		if (target.mappedHookPath) {
-			await this.handleMappedHook(target.pid, target.name, target.mappedHookPath);
+			await this.handleMappedHook(target, target.mappedHookPath);
 			return;
 		}
 
 		if (blocked.reason === 'injection-failed') {
-			// Automatic injection retries are deliberately capped. We only keep probing /proc so
-			// an externally restored HomeBack mapping can be adopted without restarting this helper.
+			// Automatic injection retries are deliberately capped. Keep probing /proc so
+			// an externally restored HomeBack mapping can still be adopted safely.
 			return;
 		}
 
 		this.blockedHooks.delete(target.pid);
 		this.injectionFailures.delete(target.pid);
-		await this.inject(target.pid, target.name);
+		await this.inject(target);
 	}
 
 	private async inspectMappedHook(pid: number): Promise<HookInspection> {
@@ -579,47 +631,47 @@ export class RemoteInputManager {
 	}
 
 	private blockTarget(
-		pid: number,
-		name: string,
+		target: TargetIdentity,
 		hookPath: string,
 		reason: BlockedHookReason,
 		recovery: string,
 		failures?: number,
 	): boolean {
 		const now = Date.now();
-		const previous = this.blockedHooks.get(pid);
-		const changed = !previous || previous.reason !== reason || previous.hookPath !== hookPath;
-		this.blockedHooks.set(pid, {
-			pid,
-			name,
+		const previous = this.blockedHooks.get(target.pid);
+		const sameIdentity = previous?.startTimeTicks === target.startTimeTicks;
+		const changed = !previous || !sameIdentity || previous.reason !== reason || previous.hookPath !== hookPath;
+		this.blockedHooks.set(target.pid, {
+			pid: target.pid,
+			name: target.name,
+			startTimeTicks: target.startTimeTicks,
 			hookPath,
 			reason,
 			recovery,
 			failures,
-			firstBlockedAt: previous?.firstBlockedAt ?? now,
+			firstBlockedAt: sameIdentity && previous ? previous.firstBlockedAt : now,
 			lastCheckedAt: now,
 			nextRecheckAt: now + BLOCKED_RECHECK_MS,
 		});
 		return changed;
 	}
 
-	private async handleMappedHook(pid: number, name: string, mappedHookPath: string): Promise<void> {
+	private async handleMappedHook(target: ProcTargetSnapshot, mappedHookPath: string): Promise<void> {
 		if (await this.isHomeBackHookPath(mappedHookPath)) {
-			await this.adoptExistingHook(pid, name, mappedHookPath);
+			await this.adoptExistingHook(target, mappedHookPath);
 			return;
 		}
 
-		this.injectionFailures.delete(pid);
+		this.injectionFailures.delete(target.pid);
 		const changed = this.blockTarget(
-			pid,
-			name,
+			target,
 			mappedHookPath,
 			'foreign-hook',
 			'Remove the conflicting input hook and restart the target process (or reboot) before HomeBack can own it.',
 		);
 		if (changed) {
 			console.warn(
-				`Refusing to inject ${name} (${pid}): an existing non-HomeBack input hook is already mapped at ` +
+				`Refusing to inject ${target.name} (${target.pid}): an existing non-HomeBack input hook is already mapped at ` +
 					`${mappedHookPath}. Remove the conflicting hook and restart the target process or reboot.`,
 			);
 		}
@@ -639,28 +691,31 @@ export class RemoteInputManager {
 		}
 	}
 
-	private async adoptExistingHook(pid: number, name: string, hookPath: string): Promise<void> {
+	private async adoptExistingHook(target: ProcTargetSnapshot, hookPath: string): Promise<void> {
+		const { pid, name, startTimeTicks } = target;
 		const logPath = `/tmp/homeback-inputhook-${name}-${pid}.log`;
 		const injectorLogPath = `/tmp/homeback-ezinject-${name}-${pid}.log`;
 
-		let offset: number;
+		let fd: number | null = null;
+		let offset = 0;
 		try {
-			const handle = await fs.open(logPath, fsConstants.O_RDWR | fsConstants.O_NOFOLLOW);
-			try {
-				const stat = await handle.stat();
-				if (!stat.isFile()) throw new Error('event log is not a regular file');
-				offset = stat.size;
-				if (offset > MAX_LOG_BYTES) {
-					await handle.truncate(0);
-					offset = 0;
-				}
-			} finally {
-				await handle.close();
+			fd = openSync(logPath, fsConstants.O_RDWR | fsConstants.O_NOFOLLOW);
+			const stat = fstatSync(fd);
+			if (!stat.isFile()) throw new Error('event log is not a regular file');
+			offset = stat.size;
+			if (offset > MAX_LOG_BYTES) {
+				ftruncateSync(fd, 0);
+				offset = 0;
+			}
+
+			const liveStartTime = await this.readProcessStartTime(pid);
+			if (liveStartTime !== startTimeTicks) {
+				throw new Error('target identity changed while adopting existing hook');
 			}
 		} catch (error) {
+			if (fd !== null) closeSync(fd);
 			const changed = this.blockTarget(
-				pid,
-				name,
+				target,
 				hookPath,
 				'homeback-log-missing',
 				'Restart the target process or reboot. HomeBack will periodically recheck in case the log failure was transient.',
@@ -680,25 +735,33 @@ export class RemoteInputManager {
 		this.targets.set(pid, {
 			pid,
 			name,
+			startTimeTicks,
 			logPath,
 			injectorLogPath,
 			hookPath,
 			state: 'active',
 			source: 'adopted',
+			injectionWatchdog: null,
+			injector: null,
 		});
 		// Start at EOF so a recreated helper never replays stale key events from before its restart.
-		this.logs.set(logPath, { path: logPath, offset, carry: '' });
+		this.logTailer.add(logPath, fd!, offset, true);
 		console.log(`Adopted existing HomeBack remote hook in ${name} (${pid}); reinjection skipped.`);
 	}
 
-	private async inject(pid: number, name: string): Promise<void> {
-		// Re-check immediately before spawning ezinject. This closes the race where another
-		// helper instance (or a foreign hook) maps libinputhookpp.so after the process scan.
+	private async inject(snapshot: ProcTargetSnapshot): Promise<void> {
+		const { pid, name, startTimeTicks } = snapshot;
+		// Re-check target identity and maps immediately before spawning ezinject. This
+		// closes both PID-reuse and concurrent-hook races between scan and injection.
+		if (await this.readProcessStartTime(pid) !== startTimeTicks) {
+			void this.scanProcesses();
+			return;
+		}
+
 		const inspection = await this.inspectMappedHook(pid);
 		if (!inspection.mapsReadable) {
 			this.blockTarget(
-				pid,
-				name,
+				snapshot,
 				'',
 				'proc-maps-unreadable',
 				'HomeBack could not complete its final /proc maps safety check. It will retry without injecting.',
@@ -706,7 +769,7 @@ export class RemoteInputManager {
 			return;
 		}
 		if (inspection.mappedHookPath) {
-			await this.handleMappedHook(pid, name, inspection.mappedHookPath);
+			await this.handleMappedHook({ ...snapshot, ...inspection }, inspection.mappedHookPath);
 			return;
 		}
 
@@ -715,54 +778,81 @@ export class RemoteInputManager {
 		const target: InjectedTarget = {
 			pid,
 			name,
+			startTimeTicks,
 			logPath,
 			injectorLogPath,
 			hookPath: INPUTHOOK_LIBRARY_PATH,
 			state: 'injecting',
 			source: 'injected',
+			injectionWatchdog: null,
+			injector: null,
 		};
 		this.targets.set(pid, target);
 
+		let injectorFd: number | null = null;
 		try {
-			await createFreshLogFile(logPath);
-			await createFreshLogFile(injectorLogPath);
-			this.logs.set(logPath, { path: logPath, offset: 0, carry: '' });
+			const eventFd = createFreshLogFile(logPath);
+			this.logTailer.add(logPath, eventFd, 0, true);
+			injectorFd = createFreshLogFile(injectorLogPath);
 
-			const fd = openSync(
-				injectorLogPath,
-				fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_NOFOLLOW,
-			);
-			try {
-				const child = spawn(EZINJECT_PATH, ['-l', logPath, String(pid), INPUTHOOK_LIBRARY_PATH], {
-					detached: true,
-					stdio: ['ignore', fd, fd],
+			const child = spawn(EZINJECT_PATH, ['-l', logPath, String(pid), INPUTHOOK_LIBRARY_PATH], {
+				detached: true,
+				stdio: ['ignore', injectorFd, injectorFd],
+			});
+			target.injector = child;
+			target.injectionWatchdog = setTimeout(() => {
+				if (this.targets.get(pid) !== target || target.state !== 'injecting') return;
+				console.error(`ezinject watchdog expired for ${name} (${pid}) after ${INJECTION_WATCHDOG_MS}ms.`);
+				try {
+					child.kill('SIGKILL');
+				} catch {
+					// Process may have exited between the watchdog check and kill.
+				}
+				void this.failInjection(target, 'ezinject timed out').catch(error => {
+					console.error('Failed to record ezinject timeout:', error);
 				});
+			}, INJECTION_WATCHDOG_MS);
 
-				child.once('error', error => {
-					void this.failInjection(target, `spawn error: ${String(error)}`);
+			child.once('error', error => {
+				this.clearInjectionWatchdog(target);
+				target.injector = null;
+				void this.failInjection(target, `spawn error: ${String(error)}`).catch(failureError => {
+					console.error('Failed to record injection spawn error:', failureError);
 				});
+			});
 
-				child.once('exit', (code, signal) => {
-					if (code !== 0 || signal !== null) {
-						void this.failInjection(
-							target,
-							`ezinject exit code=${String(code)} signal=${String(signal)}`,
-						);
-						return;
-					}
-					setTimeout(() => {
-						void this.verifyInjection(target);
-					}, INJECTION_VERIFY_DELAY_MS);
-				});
+			child.once('exit', (code, signal) => {
+				this.clearInjectionWatchdog(target);
+				target.injector = null;
+				if (code !== 0 || signal !== null) {
+					void this.failInjection(
+						target,
+						`ezinject exit code=${String(code)} signal=${String(signal)}`,
+					).catch(failureError => {
+						console.error('Failed to record injection exit error:', failureError);
+					});
+					return;
+				}
+				setTimeout(() => {
+					void this.verifyInjection(target).catch(error => {
+						console.error('Injection verification failed unexpectedly:', error);
+					});
+				}, INJECTION_VERIFY_DELAY_MS);
+			});
 
-				child.unref();
-				console.log(`Injecting HomeBack remote hook into ${name} (${pid})`);
-			} finally {
-				closeSync(fd);
-			}
+			child.unref();
+			console.log(`Injecting HomeBack remote hook into ${name} (${pid})`);
 		} catch (error) {
 			await this.failInjection(target, `unable to start ezinject: ${String(error)}`);
+		} finally {
+			if (injectorFd !== null) closeSync(injectorFd);
 		}
+	}
+
+	private clearInjectionWatchdog(target: InjectedTarget): void {
+		if (!target.injectionWatchdog) return;
+		clearTimeout(target.injectionWatchdog);
+		target.injectionWatchdog = null;
 	}
 
 	private async verifyInjection(target: InjectedTarget): Promise<void> {
@@ -771,22 +861,28 @@ export class RemoteInputManager {
 		for (let attempt = 1; attempt <= INJECTION_VERIFY_ATTEMPTS; attempt += 1) {
 			if (this.targets.get(target.pid) !== target) return;
 
-			try {
-				const maps = await fs.readFile(`/proc/${target.pid}/maps`, 'utf8');
-				const mappedHookPath = findMappedLibraryPath(maps, basename(INPUTHOOK_LIBRARY_PATH));
-				if (!mappedHookPath) throw new Error('input hook library not present in target process maps');
-				if (!(await this.isHomeBackHookPath(mappedHookPath))) {
-					throw new Error(`unexpected input hook mapped after injection: ${mappedHookPath}`);
-				}
+			const startTimeTicks = await this.readProcessStartTime(target.pid);
+			if (startTimeTicks !== target.startTimeTicks) {
+				console.warn(`Target PID ${target.pid} was reused while verifying ${target.name}; abandoning stale verification.`);
+				await this.cleanupTarget(target.pid);
+				void this.scanProcesses();
+				return;
+			}
 
-				target.hookPath = mappedHookPath;
+			const inspection = await this.inspectMappedHook(target.pid);
+			if (!inspection.mapsReadable) {
+				lastError = 'target process maps became unreadable';
+			} else if (!inspection.mappedHookPath) {
+				lastError = 'input hook library not present in target process maps';
+			} else if (!(await this.isHomeBackHookPath(inspection.mappedHookPath))) {
+				lastError = `unexpected input hook mapped after injection: ${inspection.mappedHookPath}`;
+			} else {
+				target.hookPath = inspection.mappedHookPath;
 				target.state = 'active';
 				this.injectionFailures.delete(target.pid);
 				this.blockedHooks.delete(target.pid);
 				console.log(`HomeBack remote hook active in ${target.name} (${target.pid})`);
 				return;
-			} catch (error) {
-				lastError = String(error);
 			}
 
 			if (attempt < INJECTION_VERIFY_ATTEMPTS) {
@@ -802,13 +898,13 @@ export class RemoteInputManager {
 		if (this.targets.get(target.pid) !== target) return;
 		await this.cleanupTarget(target.pid);
 
-		const previousFailures = this.injectionFailures.get(target.pid)?.failures ?? 0;
+		const previous = this.injectionFailures.get(target.pid);
+		const previousFailures = previous?.startTimeTicks === target.startTimeTicks ? previous.failures : 0;
 		const failures = previousFailures + 1;
 		if (failures >= MAX_INJECTION_FAILURES) {
 			this.injectionFailures.delete(target.pid);
 			this.blockTarget(
-				target.pid,
-				target.name,
+				target,
 				'',
 				'injection-failed',
 				'Fix the injection failure, then restart the target process (or reboot) to permit automatic injection again.',
@@ -822,9 +918,22 @@ export class RemoteInputManager {
 		}
 
 		const retryDelay = injectionRetryDelayMs(failures);
-		if (retryDelay === null) throw new Error('retry policy returned no delay before failure limit');
+		if (retryDelay === null) {
+			console.error(
+				`Injection retry policy returned no delay before the failure limit for ${target.name} (${target.pid}); blocking safely.`,
+			);
+			this.blockTarget(
+				target,
+				'',
+				'injection-failed',
+				'Restart the target process or reboot after correcting the injection failure.',
+				failures,
+			);
+			return;
+		}
 		this.injectionFailures.set(target.pid, {
 			name: target.name,
+			startTimeTicks: target.startTimeTicks,
 			failures,
 			nextAttemptAt: Date.now() + retryDelay,
 			lastError: error,
@@ -840,67 +949,20 @@ export class RemoteInputManager {
 		if (!target) return;
 
 		this.targets.delete(pid);
-		this.logs.delete(target.logPath);
+		this.clearInjectionWatchdog(target);
+		if (target.injector) {
+			try {
+				target.injector.kill('SIGKILL');
+			} catch {
+				// Injector may already have exited.
+			}
+			target.injector = null;
+		}
+		this.logTailer.remove(target.logPath);
 		await Promise.all([
 			fs.unlink(target.logPath).catch(() => undefined),
 			fs.unlink(target.injectorLogPath).catch(() => undefined),
 		]);
-	}
-
-	private pollLogs(): void {
-		for (const cursor of this.logs.values()) {
-			try {
-				const stat = statSync(cursor.path);
-				if (stat.size < cursor.offset) {
-					cursor.offset = 0;
-					cursor.carry = '';
-				}
-				if (stat.size <= cursor.offset) {
-					this.rotateLogIfNeeded(cursor, stat.size);
-					continue;
-				}
-
-				const length = Math.min(stat.size - cursor.offset, MAX_LOG_READ);
-				const buffer = Buffer.allocUnsafe(length);
-				const fd = openSync(cursor.path, 'r');
-				let bytesRead = 0;
-				try {
-					bytesRead = readSync(fd, buffer, 0, length, cursor.offset);
-				} finally {
-					closeSync(fd);
-				}
-				if (bytesRead <= 0) continue;
-
-				cursor.offset += bytesRead;
-				const text = cursor.carry + buffer.subarray(0, bytesRead).toString('utf8');
-				const lines = text.split(/\r?\n/);
-				cursor.carry = lines.pop() ?? '';
-				for (const line of lines) this.parseLogLine(line);
-
-				this.rotateLogIfNeeded(cursor, stat.size);
-			} catch (error) {
-				const code = (error as NodeJS.ErrnoException).code;
-				if (code !== 'ENOENT') console.error(`Failed reading ${cursor.path}:`, error);
-			}
-		}
-	}
-
-	private rotateLogIfNeeded(cursor: LogCursor, knownSize: number): void {
-		if (
-			!cursor.path.startsWith('/tmp/homeback-inputhook-') ||
-			knownSize < MAX_LOG_BYTES ||
-			cursor.offset < knownSize ||
-			cursor.carry.length > 0
-		) {
-			return;
-		}
-
-		try {
-			truncateSync(cursor.path, 0);
-			cursor.offset = 0;
-		} catch (error) {
-			console.warn(`Unable to truncate oversized remote-input log ${cursor.path}:`, error);
-		}
 	}
 
 	private parseLogLine(line: string): void {
@@ -944,7 +1006,7 @@ export class RemoteInputManager {
 			this.clearActivePress(keycode, active);
 			if (!active.longFired && active.mapping.short && this.canFireAction(keycode)) {
 				this.markActionFired(keycode);
-				void this.executeAction(active.mapping.short, keycode, 'short');
+				void this.actionRunner.execute(active.mapping.short, keycode, 'short');
 			}
 			return;
 		}
@@ -969,7 +1031,7 @@ export class RemoteInputManager {
 				if (current !== active || !this.canFireAction(keycode)) return;
 				current.longFired = true;
 				this.markActionFired(keycode);
-				void this.executeAction(mapping.long!, keycode, 'long');
+				void this.actionRunner.execute(mapping.long!, keycode, 'long');
 			}, threshold);
 		}
 
@@ -988,12 +1050,6 @@ export class RemoteInputManager {
 		this.activePresses.delete(keycode);
 	}
 
-	private sweepActivePresses(): void {
-		for (const [keycode, active] of this.activePresses) {
-			if (!active.watchdogTimer) this.clearActivePress(keycode, active);
-		}
-	}
-
 	private canFireAction(keycode: number): boolean {
 		const previous = this.lastActionAt.get(keycode) ?? 0;
 		return Date.now() - previous >= ACTION_COOLDOWN_MS;
@@ -1003,56 +1059,5 @@ export class RemoteInputManager {
 		this.lastActionAt.set(keycode, Date.now());
 	}
 
-	private async executeAction(action: SemanticAction, keycode: number, kind: 'short' | 'long'): Promise<void> {
-		const record: LastRemoteAction = {
-			keycode,
-			kind,
-			action: action.action,
-			startedAtMs: Date.now(),
-			completedAtMs: null,
-			outcome: 'pending',
-		};
-		this.lastAction = record;
-
-		try {
-			console.log(
-				`Remote key ${keycode} ${kind}: ${action.action} at=${new Date(record.startedAtMs).toISOString()}`,
-			);
-
-			switch (action.action) {
-				case 'ignore':
-					break;
-				case 'launch': {
-					const params = action.params ?? (action.id === APP_ID ? { intent: 'homeback:show' } : undefined);
-					await this.service.oneshot('luna://com.webos.applicationManager/launch', {
-						id: action.id,
-						...(params ? { params } : {}),
-					});
-					break;
-				}
-				case 'replace':
-					await this.service.oneshot('luna://com.webos.service.micomservice/sendKeycode', {
-						keycode: action.keycode,
-					});
-					break;
-				case 'exec': {
-					const child = spawn('/bin/sh', ['-c', action.command], {
-						detached: true,
-						stdio: 'ignore',
-					});
-					child.unref();
-					break;
-				}
-			}
-
-			record.completedAtMs = Date.now();
-			record.outcome = 'ok';
-		} catch (error) {
-			record.completedAtMs = Date.now();
-			record.outcome = 'error';
-			record.error = error instanceof Error ? error.message : String(error);
-			console.error(`Remote key ${keycode} ${kind} action failed:`, error);
-		}
-	}
 
 }
