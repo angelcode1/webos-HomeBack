@@ -1,218 +1,33 @@
-name: Sync HomeBack 0.4.15 exact source
+name: Audit HomeBack 0.4.15 source blobs
 
 on:
   push:
     branches:
       - release-0.4.15-staging
 
-permissions:
-  contents: write
-
 jobs:
-  sync:
+  audit:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout staging inputs
+      - name: Checkout complete repository history
         uses: actions/checkout@v4
         with:
           ref: release-0.4.15-staging
           fetch-depth: 0
 
-      - name: Preserve validation inputs and release infrastructure
+      - name: Report exact baseline blobs missing from repository history
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/homeback-infra/.github/workflows /tmp/homeback-infra/scripts /tmp/homeback-chunks
-          cp .github/workflows/release.yml /tmp/homeback-infra/.github/workflows/release.yml
-          cp scripts/fix-ipk-installed-size.sh /tmp/homeback-infra/scripts/fix-ipk-installed-size.sh
-          cp scripts/generate-manifest.cjs /tmp/homeback-infra/scripts/generate-manifest.cjs
-          cp .github/homeback-sync/expected.manifest /tmp/homeback-expected.manifest
-          cp .github/homeback-review8/chunk-*.b64 /tmp/homeback-chunks/
-          git rev-parse origin/main > /tmp/homeback-main-sha
-
-      - name: Resolve patch order against exact baseline manifest
-        shell: bash
-        run: |
-          set -euo pipefail
-          git worktree add --detach /tmp/homeback-final origin/main
-          python3 - <<'PY'
-          import base64
-          import hashlib
-          import itertools
-          import os
-          from pathlib import Path
-          import stat
-          import subprocess
-
-          candidate = Path('/tmp/homeback-final')
-          patch_path = Path('/tmp/homeback-0.4.15.patch')
-          chunk_paths = sorted(Path('/tmp/homeback-chunks').glob('chunk-*.b64'))
-          if len(chunk_paths) != 5:
-              raise SystemExit(f'expected 5 patch chunks, found {len(chunk_paths)}')
-
-          decoded = {p.name: base64.b64decode(p.read_bytes()) for p in chunk_paths}
-          manifest = []
-          for line in Path('/tmp/homeback-expected.manifest').read_text().splitlines():
-              if not line.strip():
-                  continue
-              mode, sha, rel = line.split(maxsplit=2)
-              manifest.append((mode, sha, rel))
-
-          def blob_sha(path: Path) -> str:
-              data = path.read_bytes()
-              header = f'blob {len(data)}\0'.encode()
-              return hashlib.sha1(header + data).hexdigest()
-
-          def file_mode(path: Path) -> str:
-              return '100755' if (path.stat().st_mode & stat.S_IXUSR) else '100644'
-
-          # The 9.6 MB native payload is unchanged by the source patch. Skip it while
-          # testing permutations, then validate it once after a matching order is found.
-          permutation_manifest = [row for row in manifest if not row[2].endswith('/libinputhookpp.so')]
-          selected = None
-          last_error = ''
-
-          for attempt, order in enumerate(itertools.permutations(chunk_paths), start=1):
-              subprocess.run(['git', 'reset', '--hard', 'origin/main'], cwd=candidate, check=True,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-              subprocess.run(['git', 'clean', '-fdx'], cwd=candidate, check=True,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-              patch_path.write_bytes(b''.join(decoded[p.name] for p in order))
-              applied = subprocess.run(
-                  ['git', 'apply', '--binary', str(patch_path)],
-                  cwd=candidate,
-                  stdout=subprocess.PIPE,
-                  stderr=subprocess.PIPE,
-                  text=True,
-              )
-              if applied.returncode != 0:
-                  last_error = applied.stderr.strip()
-                  continue
-
-              matches = True
-              for mode, expected_sha, rel in permutation_manifest:
-                  path = candidate / rel
-                  if not path.is_file() or blob_sha(path) != expected_sha or file_mode(path) != mode:
-                      matches = False
-                      break
-              if matches:
-                  selected = order
-                  print(f'validated patch order on attempt {attempt}: ' + ' -> '.join(p.name for p in order))
-                  break
-
-          if selected is None:
-              raise SystemExit('no patch permutation reproduced the all-review-fixes baseline; last apply error: ' + last_error)
-
-          # Full one-time validation, including the large native payload.
-          for mode, expected_sha, rel in manifest:
-              path = candidate / rel
-              if not path.is_file():
-                  raise SystemExit(f'missing baseline file after patch: {rel}')
-              actual_sha = blob_sha(path)
-              if actual_sha != expected_sha:
-                  raise SystemExit(f'content mismatch after patch: {rel} expected={expected_sha} actual={actual_sha}')
-              actual_mode = file_mode(path)
-              if actual_mode != mode:
-                  raise SystemExit(f'mode mismatch after patch: {rel} expected={mode} actual={actual_mode}')
-          PY
-
-      - name: Restore approved release infrastructure
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/homeback-final/.github/workflows /tmp/homeback-final/scripts
-          cp -p /tmp/homeback-infra/.github/workflows/release.yml /tmp/homeback-final/.github/workflows/release.yml
-          cp -p /tmp/homeback-infra/scripts/fix-ipk-installed-size.sh /tmp/homeback-final/scripts/fix-ipk-installed-size.sh
-          cp -p /tmp/homeback-infra/scripts/generate-manifest.cjs /tmp/homeback-final/scripts/generate-manifest.cjs
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Regenerate Yarn lock against final source
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd /tmp/homeback-final
-          corepack enable
-          corepack prepare yarn@4.12.0 --activate
-          rm -f yarn.lock
-          yarn install --no-immutable
-          grep -q '"@homeback/app@workspace:packages/app"' yarn.lock
-          grep -q '"@homeback/service@workspace:packages/service"' yarn.lock
-          grep -q '"@homeback/utils@workspace:packages/utils"' yarn.lock
-          if grep -q '@althome/' yarn.lock; then
-            echo 'stale @althome workspace remains in yarn.lock' >&2
-            exit 1
-          fi
-          yarn install --immutable
-
-      - name: Verify exact final tree
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd /tmp/homeback-final
-
-          while read -r expected_mode expected_sha path; do
-            test -f "$path" || { echo "missing baseline file: $path" >&2; exit 1; }
-            actual_sha="$(git hash-object "$path")"
-            test "$actual_sha" = "$expected_sha" || {
-              echo "content mismatch: $path expected=$expected_sha actual=$actual_sha" >&2
-              exit 1
-            }
-          done < /tmp/homeback-expected.manifest
-
-          test "$(git hash-object packages/service/src/remote-input.ts)" = \
-            'b3574089995c15dd54747e8d5879a6e32f556c00'
-          test "$(git hash-object .github/workflows/release.yml)" = \
-            '29ba78622dea0283a3a8e24223ca4e23a1f72fcf'
-          test "$(git hash-object scripts/fix-ipk-installed-size.sh)" = \
-            'c6f17da140488b9967cc1cfdf364196dd0827ce7'
-          test "$(git hash-object scripts/generate-manifest.cjs)" = \
-            'c996512f49cb6ce3adce38006bad31daff1b021b'
-
-          git add -A
-
-          while read -r expected_mode expected_sha path; do
-            actual_mode="$(git ls-files -s -- "$path" | awk '{print $1}')"
-            test "$actual_mode" = "$expected_mode" || {
-              echo "mode mismatch: $path expected=$expected_mode actual=$actual_mode" >&2
-              exit 1
-            }
-          done < /tmp/homeback-expected.manifest
-
-          awk '{ $1=""; $2=""; sub(/^  */, ""); print }' /tmp/homeback-expected.manifest > /tmp/expected-paths
-          printf '%s\n' \
-            '.github/workflows/release.yml' \
-            'scripts/fix-ipk-installed-size.sh' \
-            'scripts/generate-manifest.cjs' \
-            'yarn.lock' >> /tmp/expected-paths
-          sort -u /tmp/expected-paths -o /tmp/expected-paths
-          git ls-files | sort -u > /tmp/actual-paths
-          if ! diff -u /tmp/expected-paths /tmp/actual-paths; then
-            echo 'repository file set differs from all-review-fixes baseline plus approved release infrastructure' >&2
-            exit 1
-          fi
-
-          git diff --cached --check
-
-      - name: Run full source checks
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd /tmp/homeback-final
-          yarn check:full
-
-      - name: Commit validated source as one main-parented commit
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd /tmp/homeback-final
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Sync HomeBack 0.4.15 all-review fixes'
-          test "$(git rev-parse HEAD^)" = "$(cat /tmp/homeback-main-sha)"
-          git push --force-with-lease=refs/heads/release-0.4.15-staging:${GITHUB_SHA} \
-            origin HEAD:refs/heads/release-0.4.15-staging
+          missing=0
+          total=0
+          while read -r mode sha path; do
+            total=$((total + 1))
+            if ! git cat-file -e "${sha}^{blob}" 2>/dev/null; then
+              printf 'MISSING %s %s %s\n' "$mode" "$sha" "$path"
+              missing=$((missing + 1))
+            fi
+          done < .github/homeback-sync/expected.manifest
+          echo "BASELINE_TOTAL=$total"
+          echo "MISSING_TOTAL=$missing"
