@@ -1,64 +1,120 @@
 name: Build and Release HomeBack
+run-name: Publish ${{ inputs.tag }}
+
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to publish, for example v0.4.20
+        required: true
+        type: string
+      confirmation:
+        description: Type PUBLISH to confirm public release creation
+        required: true
+        type: string
+      allow_existing_release:
+        description: Allow replacing assets on an existing release
+        required: false
+        default: false
+        type: boolean
+
 permissions:
   contents: write
+
+concurrency:
+  group: homeback-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
 jobs:
   release:
     name: Build IPK and create release
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source
+      - name: Require explicit publication confirmation
+        run: |
+          if [ "${{ inputs.confirmation }}" != "PUBLISH" ]; then
+            echo "Release blocked: confirmation must be exactly PUBLISH"
+            exit 1
+          fi
+          if ! printf '%s' "${{ inputs.tag }}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Release blocked: tag must look like v0.4.20"
+            exit 1
+          fi
+
+      - name: Checkout release tag
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
           node-version: '22'
           package-manager-cache: false
+
       - name: Enable Corepack
         run: |
           corepack enable
           corepack prepare yarn@4.12.0 --activate
           yarn --version
+
       - name: Validate release tag
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          test "${GITHUB_REF_NAME}" = "v${VERSION}"
+          TAG="${{ inputs.tag }}"
+          test "$TAG" = "v${VERSION}"
+          git rev-parse --verify "refs/tags/${TAG}^{commit}" >/dev/null
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+
+      - name: Reject accidental republish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1 && [ "${{ inputs.allow_existing_release }}" != "true" ]; then
+            echo "Release $RELEASE_TAG already exists. Re-run manually with allow_existing_release enabled only if replacement is intentional."
+            exit 1
+          fi
+
       - name: Install dependencies
         run: yarn install --immutable
+
       - name: Verify source
         run: yarn check:full
+
       - name: Verify publication
         env:
           HOMEBACK_NATIVE_REDISTRIBUTION_CONFIRMED: ${{ vars.HOMEBACK_NATIVE_REDISTRIBUTION_CONFIRMED }}
         run: yarn verify:publication
+
       - name: Build production IPK
         run: |
           rm -rf dist
           yarn build
+
       - name: Show build output
         run: |
           echo "Build output:"
           find dist -maxdepth 1 -type f -print
           ls -lh dist
+
       - name: Validate IPK exists
         run: |
-          VERSION="$(node -p "require('./package.json').version")"
           APP_ID="$(node -p "require('./package.json').id")"
           IPK="dist/${APP_ID}_${VERSION}_all.ipk"
           echo "Expected IPK: $IPK"
           test -f "$IPK"
           echo "IPK_PATH=$IPK" >> "$GITHUB_ENV"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
       - name: Fix IPK Installed-Size (packager plugin limitation)
-        run: |
-          bash scripts/fix-ipk-installed-size.sh "$IPK_PATH"
+        run: bash scripts/fix-ipk-installed-size.sh "$IPK_PATH"
+
       - name: Generate SHA256 checksum
         run: |
           sha256sum "$IPK_PATH" > "${IPK_PATH}.sha256"
           cat "${IPK_PATH}.sha256"
+
       - name: Generate Homebrew manifest
         run: |
           IPK_HASH="$(cut -d' ' -f1 "${IPK_PATH}.sha256")"
@@ -67,9 +123,16 @@ jobs:
           IPK_HASH="$IPK_HASH" IPK_NAME="$IPK_NAME" MANIFEST_PATH="$MANIFEST_PATH" node scripts/generate-manifest.cjs
           cat "$MANIFEST_PATH"
           echo "MANIFEST_PATH=$MANIFEST_PATH" >> "$GITHUB_ENV"
+
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${GITHUB_REF_NAME}" "$IPK_PATH" "${IPK_PATH}.sha256" "$MANIFEST_PATH" --clobber 2>/dev/null || \
-          gh release create "${GITHUB_REF_NAME}" "$IPK_PATH" "${IPK_PATH}.sha256" "$MANIFEST_PATH" --title "HomeBack ${VERSION}" --generate-notes
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$IPK_PATH" "${IPK_PATH}.sha256" "$MANIFEST_PATH" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$IPK_PATH" "${IPK_PATH}.sha256" "$MANIFEST_PATH" \
+              --verify-tag \
+              --title "HomeBack ${VERSION}" \
+              --generate-notes
+          fi
