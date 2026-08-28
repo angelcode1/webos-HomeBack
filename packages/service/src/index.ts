@@ -1,4 +1,4 @@
-import { Service, ServiceError } from './bus';
+import { Service } from './bus';
 import { readLaunchPointIcon, type IconRequest } from './app-catalog';
 import { APPLICATION_MANAGER_URI, APP_ID } from './environment';
 import { HomeBackBootstrap } from './bootstrap';
@@ -11,7 +11,7 @@ const selfStartRemoteInput = async (): Promise<void> => {
 	if (getUid() !== 0) return;
 
 	try {
-		await bootstrap.remoteInput.start();
+		await bootstrap.startRemoteInput();
 		console.log('HomeBack root helper self-started remote input.');
 	} catch (error) {
 		console.error('HomeBack root helper could not self-start remote input:', error);
@@ -29,8 +29,7 @@ service.registerSimple('/bootstrap', async () => ({
 }));
 
 service.registerSimple('/remote/start', async () => {
-	if (getUid() !== 0) throw new ServiceError('HomeBack helper service is not running as root.', -401);
-	await bootstrap.remoteInput.start();
+	await bootstrap.startRemoteInput();
 	return { done: true, status: bootstrap.remoteInput.status() };
 });
 

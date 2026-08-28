@@ -1,4 +1,4 @@
-name: Publish HomeBack 0.4.18
+name: Publish HomeBack 0.4.19
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   publish:
-    name: Validate, tag and publish 0.4.18
+    name: Validate, tag and publish 0.4.19
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
@@ -30,9 +30,9 @@ jobs:
       - name: Validate version and tag state
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          test "$VERSION" = "0.4.18"
-          if git ls-remote --exit-code --tags origin refs/tags/v0.4.18 >/dev/null 2>&1; then
-            echo "v0.4.18 already exists"
+          test "$VERSION" = "0.4.19"
+          if git ls-remote --exit-code --tags origin refs/tags/v0.4.19 >/dev/null 2>&1; then
+            echo "v0.4.19 already exists"
             exit 1
           fi
       - name: Install dependencies

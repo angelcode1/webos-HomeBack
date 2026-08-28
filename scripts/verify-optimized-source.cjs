@@ -30,7 +30,7 @@ const appinfo = JSON.parse(read('packages/app/manifests/appinfo.json'));
 const defaults = JSON.parse(read('packages/service/vendor/inputhook/remote-buttons.default.json'));
 
 requireInvariant(pkg.id === 'com.homebrew.homeback', 'Unexpected application id');
-requireInvariant(pkg.version === '0.4.18', 'Unexpected application version');
+requireInvariant(pkg.version === '0.4.19', 'Unexpected application version');
 requireInvariant(pkg.license === 'GPL-2.0-only', 'HomeBack source license must remain GPL-2.0-only');
 requireInvariant(exists('THIRD_PARTY_NOTICES.md'), 'Third-party notices missing');
 requireInvariant(exists('scripts/verify-publication.cjs'), 'public-release provenance gate missing');
@@ -105,6 +105,12 @@ const releaseScript = read('scripts/release.sh');
 requireInvariant(bus.includes('@invariant: palmbus-keepalive'), 'palmbus keepalive invariant marker missing');
 requireInvariant(releaseScript.includes('verify:publication'), 'release script must enforce native-payload publication gate');
 requireInvariant(serviceIndex.includes('@invariant: root-helper-self-start'), 'root helper self-start invariant marker missing');
+requireInvariant(
+	serviceIndex.includes('bootstrap.startRemoteInput()') &&
+	bootstrap.includes('migrateRemoteDefaultsFile(REMOTE_CONFIG_PATH)') &&
+	bootstrap.includes('await this.startRemoteInput()'),
+	'remote config migration must run on normal remote startup and bootstrap',
+);
 requireInvariant(bootstrap.includes('/tmp/homeback-autostart.log'), 'remote-input autostart logging missing');
 requireInvariant(
 	remote.includes('configFingerprint') && remote.includes('rejectedConfigFingerprint') && remote.includes('stat.mtimeMs') && remote.includes('stat.size') && remote.includes('stat.ino'),
