@@ -1,12 +1,17 @@
 name: Build and Release HomeBack
-run-name: Publish ${{ inputs.tag }}
+run-name: Publish v${{ inputs.version }} from ${{ inputs.source_ref }}
 
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: Existing tag to publish, for example v0.4.20
+      version:
+        description: Release version without the v prefix, for example 0.4.21
         required: true
+        type: string
+      source_ref:
+        description: Source branch, tag, or commit to release
+        required: true
+        default: main
         type: string
       confirmation:
         description: Type PUBLISH to confirm public release creation
@@ -22,7 +27,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: homeback-release-${{ inputs.tag }}
+  group: homeback-release-v${{ inputs.version }}
   cancel-in-progress: false
 
 jobs:
@@ -36,15 +41,15 @@ jobs:
             echo "Release blocked: confirmation must be exactly PUBLISH"
             exit 1
           fi
-          if ! printf '%s' "${{ inputs.tag }}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Release blocked: tag must look like v0.4.20"
+          if ! printf '%s' "${{ inputs.version }}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Release blocked: version must look like 0.4.21"
             exit 1
           fi
 
-      - name: Checkout release tag
+      - name: Checkout release source
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ inputs.source_ref }}
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -59,14 +64,33 @@ jobs:
           corepack prepare yarn@4.12.0 --activate
           yarn --version
 
-      - name: Validate release tag
+      - name: Validate source version and tag state
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          TAG="${{ inputs.tag }}"
-          test "$TAG" = "v${VERSION}"
-          git rev-parse --verify "refs/tags/${TAG}^{commit}" >/dev/null
+          REQUESTED_VERSION="${{ inputs.version }}"
+          TAG="v${REQUESTED_VERSION}"
+          SOURCE_SHA="$(git rev-parse HEAD)"
+
+          if [ "$VERSION" != "$REQUESTED_VERSION" ]; then
+            echo "Release blocked: package.json is $VERSION but requested version is $REQUESTED_VERSION"
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/${TAG}^{commit}" >/dev/null; then
+            TAG_SHA="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+            if [ "$TAG_SHA" != "$SOURCE_SHA" ]; then
+              echo "Release blocked: $TAG points to $TAG_SHA but selected source is $SOURCE_SHA"
+              echo "Do not silently move a published tag; repair it explicitly before publishing."
+              exit 1
+            fi
+            echo "TAG_EXISTS=true" >> "$GITHUB_ENV"
+          else
+            echo "TAG_EXISTS=false" >> "$GITHUB_ENV"
+          fi
+
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+          echo "SOURCE_SHA=$SOURCE_SHA" >> "$GITHUB_ENV"
 
       - name: Reject accidental republish
         env:
@@ -123,6 +147,14 @@ jobs:
           IPK_HASH="$IPK_HASH" IPK_NAME="$IPK_NAME" MANIFEST_PATH="$MANIFEST_PATH" node scripts/generate-manifest.cjs
           cat "$MANIFEST_PATH"
           echo "MANIFEST_PATH=$MANIFEST_PATH" >> "$GITHUB_ENV"
+
+      - name: Create release tag if needed
+        if: env.TAG_EXISTS == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$RELEASE_TAG" "$SOURCE_SHA" -m "HomeBack ${VERSION}"
+          git push origin "$RELEASE_TAG"
 
       - name: Create or update GitHub Release
         env:
