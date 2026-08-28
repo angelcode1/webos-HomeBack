@@ -67,6 +67,7 @@ export const NumericKeyboardProxy = observer((): JSX.Element | null => {
 			back: close,
 			digit: digit => sendKey(digit),
 		});
+		return () => service.keyboardService.unregisterOwner('keypad');
 	}, [close, moveSelection, sendKey, service]);
 
 	useEffect(() => {
