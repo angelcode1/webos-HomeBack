@@ -1,0 +1,115 @@
+name: Publish HomeBack v0.4.21
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-v0.4.21.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Build and publish v0.4.21
+    if: github.event.head_commit.message == 'Publish HomeBack 0.4.21'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout validated release source
+        uses: actions/checkout@v7
+        with:
+          ref: d2e15839d88f31820989d85e7b7bdd03270ae394
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare yarn@4.12.0 --activate
+          yarn --version
+
+      - name: Validate exact release source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          VERSION="$(node -p "require('./package.json').version")"
+          test "$SOURCE_SHA" = "d2e15839d88f31820989d85e7b7bdd03270ae394"
+          test "$VERSION" = "0.4.21"
+          if git ls-remote --exit-code --tags origin refs/tags/v0.4.21 >/dev/null 2>&1; then
+            echo "v0.4.21 already exists; refusing to move or replace it"
+            exit 1
+          fi
+          if gh release view v0.4.21 >/dev/null 2>&1; then
+            echo "v0.4.21 release already exists; refusing accidental replacement"
+            exit 1
+          fi
+          echo "SOURCE_SHA=$SOURCE_SHA" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Verify source
+        run: yarn check:full
+
+      - name: Verify publication
+        env:
+          HOMEBACK_NATIVE_REDISTRIBUTION_CONFIRMED: ${{ vars.HOMEBACK_NATIVE_REDISTRIBUTION_CONFIRMED }}
+        run: yarn verify:publication
+
+      - name: Build production IPK
+        run: |
+          rm -rf dist
+          yarn build
+
+      - name: Validate IPK exists
+        run: |
+          APP_ID="$(node -p "require('./package.json').id")"
+          IPK_PATH="dist/${APP_ID}_${VERSION}_all.ipk"
+          test -f "$IPK_PATH"
+          echo "IPK_PATH=$IPK_PATH" >> "$GITHUB_ENV"
+
+      - name: Fix IPK Installed-Size
+        run: bash scripts/fix-ipk-installed-size.sh "$IPK_PATH"
+
+      - name: Generate checksum and manifest
+        run: |
+          sha256sum "$IPK_PATH" > "${IPK_PATH}.sha256"
+          IPK_HASH="$(cut -d' ' -f1 "${IPK_PATH}.sha256")"
+          IPK_NAME="$(basename "$IPK_PATH")"
+          MANIFEST_PATH="com.homebrew.homeback.manifest.json"
+          IPK_HASH="$IPK_HASH" IPK_NAME="$IPK_NAME" MANIFEST_PATH="$MANIFEST_PATH" node scripts/generate-manifest.cjs
+          echo "MANIFEST_PATH=$MANIFEST_PATH" >> "$GITHUB_ENV"
+
+      - name: Create v0.4.21 tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.4.21 "$SOURCE_SHA" -m "HomeBack 0.4.21"
+          git push origin v0.4.21
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.4.21 "$IPK_PATH" "${IPK_PATH}.sha256" "$MANIFEST_PATH" \
+            --verify-tag \
+            --title "HomeBack 0.4.21" \
+            --generate-notes
+
+      - name: Verify published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ASSETS="$(gh release view v0.4.21 --json assets --jq '.assets[].name')"
+          printf '%s\n' "$ASSETS"
+          printf '%s\n' "$ASSETS" | grep -Fx 'com.homebrew.homeback_0.4.21_all.ipk'
+          printf '%s\n' "$ASSETS" | grep -Fx 'com.homebrew.homeback_0.4.21_all.ipk.sha256'
+          printf '%s\n' "$ASSETS" | grep -Fx 'com.homebrew.homeback.manifest.json'
