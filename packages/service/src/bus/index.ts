@@ -129,7 +129,7 @@ export class Service {
 		generator: ReturnType<Executor<any, any>>,
 		message: Message<any>,
 	): Promise<void> {
-		while (true) {
+		for (;;) {
 			const result = await generator.next();
 			if (result.done) {
 				// A subscribed stream already replied for each yielded value. Do not send
