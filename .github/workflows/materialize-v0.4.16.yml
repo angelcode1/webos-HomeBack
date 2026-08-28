@@ -1,0 +1,527 @@
+name: Materialize v0.4.16 review fixes
+
+on:
+  push:
+    branches:
+      - fix/review-v0.4.16
+    paths:
+      - '.github/workflows/materialize-v0.4.16.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    name: Apply, verify and commit review fixes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: fix/review-v0.4.16
+          fetch-depth: 0
+
+      - name: Apply reviewed fixes
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          import json
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, found {count}: {old[:80]!r}')
+              p.write_text(text.replace(old, new, 1))
+
+          # Add-apps icon: replace opaque raster tile with an inline SVG matching the other built-ins.
+          replace_once(
+              'packages/app/src/shared/services/launcher/providers/internal/internal.provider.ts',
+              "import plus from 'assets/plus.png';\n\n",
+              '',
+          )
+          replace_once(
+              'packages/app/src/shared/services/launcher/providers/internal/internal.provider.ts',
+              "].join(''));\n\nexport class InternalProvider",
+              "].join(''));\n\nconst plusIcon = svgIcon([\n"
+              "\t'<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\">',\n"
+              "\t'<path d=\"M50 24v52M24 50h52\" fill=\"none\" stroke=\"white\" stroke-width=\"8\" stroke-linecap=\"round\"/>',\n"
+              "\t'</svg>',\n"
+              "].join(''));\n\nexport class InternalProvider",
+          )
+          replace_once(
+              'packages/app/src/shared/services/launcher/providers/internal/internal.provider.ts',
+              '\t\t\ticon: plus,\n',
+              '\t\t\ticon: plusIcon,\n',
+          )
+          Path('packages/app/src/assets/plus.png').unlink()
+          Path('packages/app/src/assets/assets.d.ts').unlink()
+          replace_once(
+              'packages/app/webpack.config.ts',
+              "\t\t\t{\n\t\t\t\ttest: /\\.png$/,\n\t\t\t\ttype: 'asset/resource',\n\t\t\t\tgenerator: {\n\t\t\t\t\tfilename: 'assets/[hash][ext]',\n\t\t\t\t},\n\t\t\t},\n",
+              '',
+          )
+
+          # Prevent provider-loading state from wiping persisted launcher order.
+          replace_once(
+              'packages/app/src/shared/services/launcher/model/launcher.service.ts',
+              '\tprivate set order(value: string[]) {\n\t\tconst nonBuiltinIds = new Set(\n',
+              '\tprivate set order(value: string[]) {\n\t\tif (!this.fulfilled) return;\n\n\t\tconst nonBuiltinIds = new Set(\n',
+          )
+
+          # Make owner registration return a stale-safe cleanup callback, and use it for keypad unmount.
+          replace_once(
+              'packages/app/src/features/ribbon/services/keyboard/keyboard.service.ts',
+              "\tpublic registerOwner(owner: KeyboardOwner, handlers: KeyboardOwnerHandlers): void {\n\t\tthis.handlers.set(owner, handlers);\n\t}\n",
+              "\tpublic registerOwner(owner: KeyboardOwner, handlers: KeyboardOwnerHandlers): () => void {\n"
+              "\t\tthis.handlers.set(owner, handlers);\n"
+              "\t\treturn () => {\n"
+              "\t\t\tif (this.handlers.get(owner) === handlers) this.handlers.delete(owner);\n"
+              "\t\t};\n"
+              "\t}\n",
+          )
+          replace_once(
+              'packages/app/src/features/ribbon/ui/numeric-keyboard-proxy/numeric-keyboard-proxy.component.tsx',
+              "\t\tservice.keyboardService.registerOwner('keypad', {\n",
+              "\t\treturn service.keyboardService.registerOwner('keypad', {\n",
+          )
+
+          # Store the remote-health interval handle and make it explicitly clearable for teardown/tests.
+          replace_once(
+              'packages/app/src/features/ribbon/services/ribbon/ribbon.service.ts',
+              '\tprivate autoHideTimer: ReturnType<typeof setTimeout> | null = null;\n',
+              '\tprivate autoHideTimer: ReturnType<typeof setTimeout> | null = null;\n\tprivate remoteHealthTimer: ReturnType<typeof setInterval> | null = null;\n',
+          )
+          replace_once(
+              'packages/app/src/features/ribbon/services/ribbon/ribbon.service.ts',
+              "\t\t\t'ref' | 'lifecycleManager' | 'hiddenWaiters' | 'autoHideTimer' | 'keyboardService'\n",
+              "\t\t\t'ref' | 'lifecycleManager' | 'hiddenWaiters' | 'autoHideTimer' | 'remoteHealthTimer' | 'keyboardService'\n",
+          )
+          replace_once(
+              'packages/app/src/features/ribbon/services/ribbon/ribbon.service.ts',
+              '\t\t\t\tautoHideTimer: false,\n\t\t\t\tkeyboardService: false,\n',
+              '\t\t\t\tautoHideTimer: false,\n\t\t\t\tremoteHealthTimer: false,\n\t\t\t\tkeyboardService: false,\n',
+          )
+          replace_once(
+              'packages/app/src/features/ribbon/services/ribbon/ribbon.service.ts',
+              "\t\tsetInterval(() => {\n\t\t\tif (this.visible) void this.refreshRemoteHealth();\n\t\t}, REMOTE_HEALTH_POLL_MS);\n\t}\n\n\tpublic get selectedLaunchPoint",
+              "\t\tthis.remoteHealthTimer = setInterval(() => {\n"
+              "\t\t\tif (this.visible) void this.refreshRemoteHealth();\n"
+              "\t\t}, REMOTE_HEALTH_POLL_MS);\n"
+              "\t}\n\n"
+              "\tpublic dispose(): void {\n"
+              "\t\tif (this.remoteHealthTimer === null) return;\n"
+              "\t\tclearInterval(this.remoteHealthTimer);\n"
+              "\t\tthis.remoteHealthTimer = null;\n"
+              "\t}\n\n"
+              "\tpublic get selectedLaunchPoint",
+          )
+
+          # Rename the local-storage key without losing existing settings.
+          replace_once(
+              'packages/app/src/shared/services/settings/model/settings.service.ts',
+              "const KEY = 'althome:settings';\n",
+              "const KEY = 'homeback:settings';\nconst LEGACY_KEY = 'althome:settings';\n",
+          )
+          replace_once(
+              'packages/app/src/shared/services/settings/model/settings.service.ts',
+              "\tprivate hydrate(): void {\n\t\tlet parsed: unknown;\n\n\t\ttry {\n\t\t\tparsed = JSON.parse(localStorage.getItem(KEY) ?? '{}');\n",
+              "\tprivate hydrate(): void {\n"
+              "\t\tlet parsed: unknown;\n"
+              "\t\tlet legacyRaw: string | null = null;\n\n"
+              "\t\ttry {\n"
+              "\t\t\tconst currentRaw = localStorage.getItem(KEY);\n"
+              "\t\t\tlegacyRaw = currentRaw === null ? localStorage.getItem(LEGACY_KEY) : null;\n"
+              "\t\t\tparsed = JSON.parse(currentRaw ?? legacyRaw ?? '{}');\n",
+          )
+          replace_once(
+              'packages/app/src/shared/services/settings/model/settings.service.ts',
+              "\t\tif (Array.isArray(value.order) && value.order.every(item => typeof item === 'string')) {\n\t\t\tthis.order = [...new Set(value.order)];\n\t\t}\n\t}\n",
+              "\t\tif (Array.isArray(value.order) && value.order.every(item => typeof item === 'string')) {\n"
+              "\t\t\tthis.order = [...new Set(value.order)];\n"
+              "\t\t}\n\n"
+              "\t\tif (legacyRaw !== null) {\n"
+              "\t\t\ttry {\n"
+              "\t\t\t\tlocalStorage.setItem(KEY, JSON.stringify({\n"
+              "\t\t\t\t\twheelVelocityFactor: this.wheelVelocityFactor,\n"
+              "\t\t\t\t\torder: this.order,\n"
+              "\t\t\t\t}));\n"
+              "\t\t\t\tlocalStorage.removeItem(LEGACY_KEY);\n"
+              "\t\t\t} catch (error) {\n"
+              "\t\t\t\tconsole.warn('Unable to migrate legacy HomeBack settings:', error);\n"
+              "\t\t\t}\n"
+              "\t\t}\n"
+              "\t}\n",
+          )
+
+          # Remove obsolete standalone colour-card styling/logic now that colour keys live in the keypad.
+          replace_once(
+              'packages/app/src/features/ribbon/ui/ribbon-card/ribbon-card.component.tsx',
+              "const COLOUR_BUTTON = /^@button:(red|green|yellow|blue)$/;\n\n",
+              '',
+          )
+          replace_once(
+              'packages/app/src/features/ribbon/ui/ribbon-card/ribbon-card.component.tsx',
+              '\t\tconst isColourButton = COLOUR_BUTTON.test(launchPoint.launchPointId);\n',
+              '',
+          )
+          replace_once(
+              'packages/app/src/features/ribbon/ui/ribbon-card/ribbon-card.component.tsx',
+              '\t\t\t\t\tisColourButton && s.colourCard,\n',
+              '',
+          )
+          replace_once(
+              'packages/app/src/features/ribbon/ui/ribbon-card/ribbon-card.component.tsx',
+              '\t\t\t\t\t\tisColourButton && s.colourIcon,\n',
+              '',
+          )
+          replace_once(
+              'packages/app/src/features/ribbon/ui/ribbon-card/ribbon-card.module.scss',
+              '$colour-card-width: $card-width * 0.6;\n',
+              '',
+          )
+          replace_once(
+              'packages/app/src/features/ribbon/ui/ribbon-card/ribbon-card.module.scss',
+              '.colourCard {\n\twidth: $colour-card-width;\n}\n\n\n',
+              '',
+          )
+          replace_once(
+              'packages/app/src/features/ribbon/ui/ribbon-card/ribbon-card.module.scss',
+              '.colourIcon {\n\twidth: 58px;\n\theight: 58px;\n}\n\n',
+              '',
+          )
+
+          # Correct remote-key labels and rotate the requested short+long action pairs together.
+          defaults_path = Path('packages/service/vendor/inputhook/remote-buttons.default.json')
+          defaults = json.loads(defaults_path.read_text())
+          keys = defaults['keys']
+          keys['1043'] = {
+              'label': 'LG Channels button',
+              'short': {'action': 'launch', 'id': 'com.webos.app.hdmi4'},
+              'long': {'action': 'replace', 'keycode': 400},
+          }
+          keys['1086'] = {
+              'label': 'Alexa button',
+              'short': {'action': 'launch', 'id': 'cdp-30'},
+              'long': {'action': 'replace', 'keycode': 401},
+          }
+          keys['1111'] = {
+              'label': 'Model-specific button (observed keycode 1111)',
+              'short': {'action': 'launch', 'id': 'com.webos.app.hdmi2'},
+              'long': {'action': 'replace', 'keycode': 398},
+          }
+          defaults_path.write_text(json.dumps(defaults, indent=2) + '\n')
+
+          # Safely migrate only existing entries that still match the old shipped action pairs.
+          Path('packages/service/src/remote-default-migration.ts').write_text("""import { promises as fs } from 'fs';
+
+import {
+\tisTimedMapping,
+\ttype RemoteConfig,
+\ttype RemoteMapping,
+\ttype TimedMapping,
+\tvalidateConfig,
+} from './remote-config';
+import { writeFile } from './utils';
+
+type ShortcutMigration = {
+\toldLabel: string;
+\tnewLabel: string;
+\toldShortId: string;
+\toldLongKeycode: number;
+\tnewShortId: string;
+\tnewLongKeycode: number;
+};
+
+const SHORTCUT_MIGRATIONS: Record<string, ShortcutMigration> = {
+\t'1043': {
+\t\toldLabel: 'Stan button',
+\t\tnewLabel: 'LG Channels button',
+\t\toldShortId: 'com.webos.app.hdmi3',
+\t\toldLongKeycode: 399,
+\t\tnewShortId: 'com.webos.app.hdmi4',
+\t\tnewLongKeycode: 400,
+\t},
+\t'1086': {
+\t\toldLabel: 'LG Channels button',
+\t\tnewLabel: 'Alexa button',
+\t\toldShortId: 'com.webos.app.hdmi4',
+\t\toldLongKeycode: 400,
+\t\tnewShortId: 'cdp-30',
+\t\tnewLongKeycode: 401,
+\t},
+\t'1111': {
+\t\toldLabel: 'Alexa button',
+\t\tnewLabel: 'Model-specific button (observed keycode 1111)',
+\t\toldShortId: 'cdp-30',
+\t\toldLongKeycode: 401,
+\t\tnewShortId: 'com.webos.app.hdmi2',
+\t\tnewLongKeycode: 398,
+\t},
+};
+
+const matchesDefaultPair = (
+\tmapping: RemoteMapping,
+\tmigration: ShortcutMigration,
+): mapping is TimedMapping =>
+\tisTimedMapping(mapping) &&
+\tmapping.short?.action === 'launch' &&
+\tmapping.short.id === migration.oldShortId &&
+\tmapping.short.params === undefined &&
+\tmapping.long?.action === 'replace' &&
+\tmapping.long.keycode === migration.oldLongKeycode;
+
+export const migrateDefaultRemoteShortcuts = (config: RemoteConfig): boolean => {
+\tlet changed = false;
+
+\tfor (const [key, migration] of Object.entries(SHORTCUT_MIGRATIONS)) {
+\t\tconst mapping = config.keys[key];
+\t\tif (!mapping || !matchesDefaultPair(mapping, migration)) continue;
+
+\t\tconst label = mapping.label === migration.oldLabel || mapping.label === undefined
+\t\t\t? migration.newLabel
+\t\t\t: mapping.label;
+\t\tconfig.keys[key] = {
+\t\t\t...mapping,
+\t\t\tlabel,
+\t\t\tshort: { action: 'launch', id: migration.newShortId },
+\t\t\tlong: { action: 'replace', keycode: migration.newLongKeycode },
+\t\t};
+\t\tchanged = true;
+\t}
+
+\treturn changed;
+};
+
+export const migrateRemoteDefaultsFile = async (path: string): Promise<void> => {
+\tlet stat;
+\ttry {
+\t\tstat = await fs.lstat(path);
+\t} catch (error) {
+\t\tif ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+\t\tthrow error;
+\t}
+\tif (!stat.isFile() || stat.isSymbolicLink()) return;
+
+\tlet parsed: unknown;
+\ttry {
+\t\tparsed = JSON.parse(await fs.readFile(path, 'utf8')) as unknown;
+\t} catch {
+\t\treturn;
+\t}
+\tif (!validateConfig(parsed) || !migrateDefaultRemoteShortcuts(parsed)) return;
+
+\tawait writeFile(path, `${JSON.stringify(parsed, null, 2)}\\n`, 0o600);
+};
+""")
+          replace_once(
+              'packages/service/src/bootstrap.ts',
+              "import { RemoteInputManager } from './remote-input';\n",
+              "import { migrateRemoteDefaultsFile } from './remote-default-migration';\n"
+              "import { REMOTE_CONFIG_PATH, RemoteInputManager } from './remote-input';\n",
+          )
+          replace_once(
+              'packages/service/src/bootstrap.ts',
+              '\t\tawait this.ensureAutostart();\n\t\tawait this.remoteInput.start();\n',
+              '\t\tawait this.ensureAutostart();\n\t\tawait migrateRemoteDefaultsFile(REMOTE_CONFIG_PATH);\n\t\tawait this.remoteInput.start();\n',
+          )
+
+          # Keep remote documentation synchronized with the shipped defaults and migration behavior.
+          doc_path = Path('REMOTE-BUTTONS.md')
+          doc = doc_path.read_text()
+          doc = doc.replace(
+              "> Existing installations keep their current `remote-buttons.json`. The bundled\n> default is used when HomeBack creates the file for the first time.\n",
+              "> Existing installations keep hand-edited mappings. Starting with HomeBack 0.4.16,\n> shortcut entries that still exactly match older shipped defaults are migrated to the\n> corrected defaults; customized short/long actions are left unchanged.\n",
+              1,
+          )
+          doc = doc.replace('Fresh installs of HomeBack 0.4.15 start with:', 'Fresh installs of HomeBack 0.4.16 start with:', 1)
+          marker = 'Fresh installs of HomeBack 0.4.16 start with:'
+          start = doc.index('```json', doc.index(marker))
+          end = doc.index('```', start + len('```json'))
+          doc = doc[:start] + '```json\n' + json.dumps(defaults, indent=2) + '\n```' + doc[end + 3:]
+          old_table = "| Netflix | YouTube | USB-C 1 |\n| Prime Video | HDMI 1 | USB-C 2 |\n| Disney+ | HDMI 2 | Red |\n| Stan | HDMI 3 | Green |\n| LG Channels | HDMI 4 | Yellow |\n| Alexa | CDP-30 | Blue |"
+          new_table = "| Netflix | YouTube | USB-C 1 |\n| Prime Video | HDMI 1 | USB-C 2 |\n| Disney+ | HDMI 2 | Red |\n| LG Channels (1043) | HDMI 4 | Yellow |\n| Alexa (1086) | Plex (CDP-30) | Blue |\n| Model-specific (1111) | HDMI 2 | Red |"
+          if old_table not in doc:
+              raise SystemExit('REMOTE-BUTTONS.md: default shortcut table not found')
+          doc = doc.replace(old_table, new_table, 1)
+          doc = doc.replace(
+              'The numeric JSON keys are the physical key codes reported by the TV. They can\nvary between remote models and firmware versions, so treat this file as an\nexample as well as the default.\n',
+              'The numeric JSON keys are the physical key codes reported by the TV. They can\nvary between remote models and firmware versions, so treat this file as an\nexample as well as the default. Keycode `1111` is retained as a model-specific\nkey observed on the tested remote rather than labelled as a standard Alexa key.\n',
+              1,
+          )
+          doc_path.write_text(doc)
+
+          # Tests for remote-default migration plus static regressions for the review fixes.
+          replace_once(
+              'tests/remote-config.test.ts',
+              "} from '../packages/service/src/remote-config.ts';\n",
+              "} from '../packages/service/src/remote-config.ts';\n"
+              "import { migrateDefaultRemoteShortcuts } from '../packages/service/src/remote-default-migration.ts';\n",
+          )
+          with Path('tests/remote-config.test.ts').open('a') as f:
+              f.write("""
+
+test('bundled shortcut defaults use corrected labels and requested action pairs', () => {
+\tconst defaults = JSON.parse(fs.readFileSync(defaultsPath, 'utf8'));
+\tassert.deepEqual(defaults.keys['1043'], {
+\t\tlabel: 'LG Channels button',
+\t\tshort: { action: 'launch', id: 'com.webos.app.hdmi4' },
+\t\tlong: { action: 'replace', keycode: 400 },
+\t});
+\tassert.deepEqual(defaults.keys['1086'], {
+\t\tlabel: 'Alexa button',
+\t\tshort: { action: 'launch', id: 'cdp-30' },
+\t\tlong: { action: 'replace', keycode: 401 },
+\t});
+\tassert.deepEqual(defaults.keys['1111'], {
+\t\tlabel: 'Model-specific button (observed keycode 1111)',
+\t\tshort: { action: 'launch', id: 'com.webos.app.hdmi2' },
+\t\tlong: { action: 'replace', keycode: 398 },
+\t});
+});
+
+test('default shortcut migration moves long press with short press and preserves custom entries', () => {
+\tconst config = {
+\t\tversion: 1 as const,
+\t\tkeys: {
+\t\t\t'1043': {
+\t\t\t\tlabel: 'Custom physical label',
+\t\t\t\tlongPressMs: 900,
+\t\t\t\tshort: { action: 'launch' as const, id: 'com.webos.app.hdmi3' },
+\t\t\t\tlong: { action: 'replace' as const, keycode: 399 },
+\t\t\t},
+\t\t\t'1086': {
+\t\t\t\tlabel: 'Custom mapping',
+\t\t\t\tshort: { action: 'launch' as const, id: 'youtube.leanback.v4' },
+\t\t\t\tlong: { action: 'replace' as const, keycode: 400 },
+\t\t\t},
+\t\t\t'1111': {
+\t\t\t\tlabel: 'Alexa button',
+\t\t\t\tshort: { action: 'launch' as const, id: 'cdp-30' },
+\t\t\t\tlong: { action: 'replace' as const, keycode: 401 },
+\t\t\t},
+\t\t},
+\t};
+
+\tassert.equal(migrateDefaultRemoteShortcuts(config), true);
+\tassert.deepEqual(config.keys['1043'], {
+\t\tlabel: 'Custom physical label',
+\t\tlongPressMs: 900,
+\t\tshort: { action: 'launch', id: 'com.webos.app.hdmi4' },
+\t\tlong: { action: 'replace', keycode: 400 },
+\t});
+\tassert.deepEqual(config.keys['1086'], {
+\t\tlabel: 'Custom mapping',
+\t\tshort: { action: 'launch', id: 'youtube.leanback.v4' },
+\t\tlong: { action: 'replace', keycode: 400 },
+\t});
+\tassert.deepEqual(config.keys['1111'], {
+\t\tlabel: 'Model-specific button (observed keycode 1111)',
+\t\tshort: { action: 'launch', id: 'com.webos.app.hdmi2' },
+\t\tlong: { action: 'replace', keycode: 398 },
+\t});
+});
+""")
+
+          Path('tests/review-regressions.test.ts').write_text("""import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import test from 'node:test';
+
+const read = (relativePath: string): string =>
+\tfs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf8');
+
+test('review hardening and cleanup remain applied', () => {
+\tconst launcher = read('packages/app/src/shared/services/launcher/model/launcher.service.ts');
+\tconst keyboard = read('packages/app/src/features/ribbon/services/keyboard/keyboard.service.ts');
+\tconst keypad = read('packages/app/src/features/ribbon/ui/numeric-keyboard-proxy/numeric-keyboard-proxy.component.tsx');
+\tconst ribbon = read('packages/app/src/features/ribbon/services/ribbon/ribbon.service.ts');
+\tconst settings = read('packages/app/src/shared/services/settings/model/settings.service.ts');
+\tconst provider = read('packages/app/src/shared/services/launcher/providers/internal/internal.provider.ts');
+\tconst card = read('packages/app/src/features/ribbon/ui/ribbon-card/ribbon-card.component.tsx');
+\tconst cardCss = read('packages/app/src/features/ribbon/ui/ribbon-card/ribbon-card.module.scss');
+\tconst webpack = read('packages/app/webpack.config.ts');
+
+\tassert.match(launcher, /private set order\(value: string\[\]\) \{\n\t\tif \(!this\.fulfilled\) return;/);
+\tassert.match(keyboard, /registerOwner[\s\S]*return \(\) =>/);
+\tassert.match(keypad, /return service\.keyboardService\.registerOwner\('keypad'/);
+\tassert.match(ribbon, /remoteHealthTimer/);
+\tassert.match(ribbon, /public dispose\(\): void/);
+\tassert.match(settings, /const KEY = 'homeback:settings'/);
+\tassert.match(settings, /const LEGACY_KEY = 'althome:settings'/);
+\tassert.match(provider, /const plusIcon = svgIcon/);
+\tassert.doesNotMatch(provider, /plus\.png/);
+\tassert.doesNotMatch(card, /COLOUR_BUTTON|colourCard|colourIcon/);
+\tassert.doesNotMatch(cardCss, /colourCard|colourIcon|colour-card-width/);
+\tassert.doesNotMatch(webpack, /test: \/\\\.png\$\//);
+\tassert.equal(fs.existsSync(path.resolve(process.cwd(), 'packages/app/src/assets/plus.png')), false);
+});
+""")
+
+          # Version and release-pipeline fixes.
+          package_path = Path('package.json')
+          package = json.loads(package_path.read_text())
+          if package['version'] != '0.4.15':
+              raise SystemExit(f"unexpected source version: {package['version']}")
+          package['version'] = '0.4.16'
+          package_path.write_text(json.dumps(package, indent=2) + '\n')
+          replace_once(
+              'scripts/verify-optimized-source.cjs',
+              "requireInvariant(pkg.version === '0.4.15', 'Unexpected application version');",
+              "requireInvariant(pkg.version === '0.4.16', 'Unexpected application version');",
+          )
+          replace_once(
+              '.github/workflows/release.yml',
+              '      - name: Install dependencies\n        run: yarn install --no-immutable\n',
+              '      - name: Validate release tag\n'
+              '        run: |\n'
+              '          VERSION="$(node -p "require(\'./package.json\').version")"\n'
+              '          test "${GITHUB_REF_NAME}" = "v${VERSION}"\n'
+              '      - name: Install dependencies\n'
+              '        run: yarn install --immutable\n',
+          )
+          PY
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare yarn@4.12.0 --activate
+          yarn --version
+
+      - name: Install dependencies immutably
+        run: yarn install --immutable
+
+      - name: Verify source, tests, types and lint
+        run: yarn check:full
+
+      - name: Verify publication gate
+        env:
+          HOMEBACK_NATIVE_REDISTRIBUTION_CONFIRMED: ${{ vars.HOMEBACK_NATIVE_REDISTRIBUTION_CONFIRMED }}
+        run: yarn verify:publication
+
+      - name: Build production IPK
+        run: |
+          rm -rf dist
+          yarn build
+          VERSION="$(node -p "require('./package.json').version")"
+          APP_ID="$(node -p "require('./package.json').id")"
+          test "$VERSION" = "0.4.16"
+          test -f "dist/${APP_ID}_${VERSION}_all.ipk"
+          ls -lh dist
+
+      - name: Commit validated candidate
+        run: |
+          rm .github/workflows/materialize-v0.4.16.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git status --short
+          git diff --cached --check
+          git commit -m 'Apply review fixes and prepare v0.4.16'
+          git push origin HEAD:fix/review-v0.4.16
