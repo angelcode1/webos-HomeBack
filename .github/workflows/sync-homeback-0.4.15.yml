@@ -29,39 +29,28 @@ jobs:
           cp scripts/generate-manifest.cjs /tmp/homeback-infra/scripts/generate-manifest.cjs
           cp .github/homeback-sync/expected.manifest /tmp/homeback-expected.manifest
 
+          # The previously generated staging lock is intentionally not an input to
+          # the source patch. Restore the main-branch lock so the binary patch sees
+          # the exact tree it was generated against; a fresh lock is generated later.
+          git checkout origin/main -- yarn.lock
+
       - name: Reconstruct and apply staged 0.4.15 patch
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import base64
-          import itertools
-          from pathlib import Path
-          import subprocess
-          import sys
+          : > /tmp/homeback-0.4.15.patch
+          for chunk in \
+            .github/homeback-review8/chunk-01.b64 \
+            .github/homeback-review8/chunk-00.b64 \
+            .github/homeback-review8/chunk-02.b64 \
+            .github/homeback-review8/chunk-03.b64 \
+            .github/homeback-review8/chunk-04.b64; do
+            test -f "$chunk"
+            base64 --decode "$chunk" >> /tmp/homeback-0.4.15.patch
+          done
 
-          paths = sorted(Path('.github/homeback-review8').glob('chunk-*.b64'))
-          if len(paths) != 5:
-              raise SystemExit(f'expected 5 patch chunks, found {len(paths)}')
-          decoded = {p.name: base64.b64decode(p.read_bytes()) for p in paths}
-          out = Path('/tmp/homeback-0.4.15.patch')
-          valid = []
-          for order in itertools.permutations(paths):
-              out.write_bytes(b''.join(decoded[p.name] for p in order))
-              result = subprocess.run(
-                  ['git', 'apply', '--binary', '--check', str(out)],
-                  stdout=subprocess.DEVNULL,
-                  stderr=subprocess.DEVNULL,
-              )
-              if result.returncode == 0:
-                  valid.append(order)
-          if len(valid) != 1:
-              names = [[p.name for p in order] for order in valid]
-              raise SystemExit(f'expected exactly one valid patch ordering, found {len(valid)}: {names}')
-          order = valid[0]
-          out.write_bytes(b''.join(decoded[p.name] for p in order))
-          print('validated patch order:', ' -> '.join(p.name for p in order))
-          PY
+          # chunk-01 is the unique first segment. The remaining four segments are
+          # complete independent diff sections, so their relative order is immaterial.
           git apply --binary --check /tmp/homeback-0.4.15.patch
           git apply --binary /tmp/homeback-0.4.15.patch
 
@@ -76,13 +65,14 @@ jobs:
           chmod +x scripts/fix-ipk-installed-size.sh
           rm -rf .github/homeback-review8 .github/homeback-sync
           rm -f .github/workflows/sync-homeback-0.4.15.yml
+          rm -f .github/workflows/generate-homeback-lock.yml
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Regenerate Yarn lock for @homeback workspaces
+      - name: Regenerate Yarn lock for final @homeback workspaces
         shell: bash
         run: |
           set -euo pipefail
@@ -97,6 +87,7 @@ jobs:
             echo 'stale @althome workspace remains in yarn.lock' >&2
             exit 1
           fi
+          yarn install --immutable
 
       - name: Verify exact source parity and repository file set
         shell: bash
@@ -110,6 +101,10 @@ jobs:
               exit 1
             }
           done < /tmp/homeback-expected.manifest
+
+          # Explicitly pin the user-requested latest remote-input.ts from the source ZIP.
+          test "$(git hash-object packages/service/src/remote-input.ts)" = \
+            'b3574089995c15dd54747e8d5879a6e32f556c00'
 
           git add -A
 
