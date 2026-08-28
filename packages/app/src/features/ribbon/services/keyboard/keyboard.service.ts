@@ -32,6 +32,13 @@ export class KeyboardService {
 		this.handlers.set(owner, handlers);
 	}
 
+	public unregisterOwner(owner: KeyboardOwner): void {
+		this.handlers.delete(owner);
+		if (this.owner !== owner) return;
+		this.owner = 'ribbon';
+		this.resetEnterState();
+	}
+
 	public setOwner(owner: KeyboardOwner): void {
 		if (this.owner === owner) return;
 		this.owner = owner;
