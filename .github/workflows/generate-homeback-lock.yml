@@ -1,0 +1,41 @@
+name: Generate HomeBack workspace lock
+
+on:
+  push:
+    branches:
+      - release-0.4.15-staging
+
+permissions:
+  contents: write
+
+jobs:
+  lock:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release-0.4.15-staging
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Generate lock against final workspace names
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare yarn@4.12.0 --activate
+          sed -i 's/@althome\//@homeback\//g' packages/app/package.json packages/service/package.json packages/utils/package.json
+          rm -f yarn.lock
+          yarn install --no-immutable
+          grep -q '"@homeback/app@workspace:packages/app"' yarn.lock
+          grep -q '"@homeback/service@workspace:packages/service"' yarn.lock
+          grep -q '"@homeback/utils@workspace:packages/utils"' yarn.lock
+          ! grep -q '@althome/' yarn.lock
+          git checkout -- packages/app/package.json packages/service/package.json packages/utils/package.json
+          git add yarn.lock
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Regenerate lock for @homeback workspaces'
+          git push origin HEAD:release-0.4.15-staging
