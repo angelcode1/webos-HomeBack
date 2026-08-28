@@ -1,5 +1,3 @@
-import plus from 'assets/plus.png';
-
 import type { LaunchPointInput } from '../../api/launch-point.interface';
 import { genericInputIcon, svgIcon } from '../../model/icon-fallback';
 import type { LaunchPointsProvider, ProviderState } from '../launch-points.provider';
@@ -13,6 +11,12 @@ const keypadIcon = svgIcon([
 	'<circle cx="36" cy="66" r="5"/><circle cx="50" cy="66" r="5"/><circle cx="64" cy="66" r="5"/>',
 	'<circle cx="50" cy="78" r="5"/>',
 	'</g></svg>',
+].join(''));
+
+const plusIcon = svgIcon([
+	'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
+	'<path d="M50 22v56M22 50h56" fill="none" stroke="white" stroke-width="8" stroke-linecap="round"/>',
+	'</svg>',
 ].join(''));
 
 export class InternalProvider implements LaunchPointsProvider {
@@ -43,7 +47,7 @@ export class InternalProvider implements LaunchPointsProvider {
 			title: 'Add apps',
 			builtin: true,
 			iconColor: '#242424',
-			icon: plus,
+			icon: plusIcon,
 			params: { internalAction: 'openDrawer' },
 		},
 	];
