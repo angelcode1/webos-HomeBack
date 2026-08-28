@@ -33,16 +33,35 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f .github/homeback-review8/chunk-00.b64
-          : > /tmp/homeback-0.4.15.patch
-          for chunk in \
-            .github/homeback-review8/chunk-00.b64 \
-            .github/homeback-review8/chunk-01.b64 \
-            .github/homeback-review8/chunk-02.b64 \
-            .github/homeback-review8/chunk-04.b64 \
-            .github/homeback-review8/chunk-03.b64; do
-            base64 --decode "$chunk" >> /tmp/homeback-0.4.15.patch
-          done
+          python3 - <<'PY'
+          import base64
+          import itertools
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          paths = sorted(Path('.github/homeback-review8').glob('chunk-*.b64'))
+          if len(paths) != 5:
+              raise SystemExit(f'expected 5 patch chunks, found {len(paths)}')
+          decoded = {p.name: base64.b64decode(p.read_bytes()) for p in paths}
+          out = Path('/tmp/homeback-0.4.15.patch')
+          valid = []
+          for order in itertools.permutations(paths):
+              out.write_bytes(b''.join(decoded[p.name] for p in order))
+              result = subprocess.run(
+                  ['git', 'apply', '--binary', '--check', str(out)],
+                  stdout=subprocess.DEVNULL,
+                  stderr=subprocess.DEVNULL,
+              )
+              if result.returncode == 0:
+                  valid.append(order)
+          if len(valid) != 1:
+              names = [[p.name for p in order] for order in valid]
+              raise SystemExit(f'expected exactly one valid patch ordering, found {len(valid)}: {names}')
+          order = valid[0]
+          out.write_bytes(b''.join(decoded[p.name] for p in order))
+          print('validated patch order:', ' -> '.join(p.name for p in order))
+          PY
           git apply --binary --check /tmp/homeback-0.4.15.patch
           git apply --binary /tmp/homeback-0.4.15.patch
 
