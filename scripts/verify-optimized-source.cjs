@@ -238,7 +238,7 @@ requireInvariant(
 	'Keypad colour row must use LG MICOM Red/Green/Yellow/Blue command bytes',
 );
 requireInvariant(
-	numericKeyboardCss.includes('bottom: 240px') && numericKeyboardCss.includes('z-index: 5000'),
+	numericKeyboardCss.includes('bottom: 212px') && numericKeyboardCss.includes('z-index: 5000'),
 	'Numeric keypad must remain positioned above the HomeBack tray',
 );
 requireInvariant(

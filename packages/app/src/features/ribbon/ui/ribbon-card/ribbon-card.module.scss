@@ -1,11 +1,13 @@
 $card-width: 118px;
+$icon-size: 84px;
 $input-tile-scale: 0.8;
 $input-card-width: $card-width * $input-tile-scale;
-$input-icon-size: 96px * $input-tile-scale;
+$input-icon-size: $icon-size * $input-tile-scale;
 $compact-utility-scale: 0.7;
 $compact-utility-card-width: $card-width * $compact-utility-scale;
-$compact-utility-icon-size: 96px * $compact-utility-scale;
-$card-height: 184px;
+$compact-utility-icon-size: $icon-size * $compact-utility-scale;
+$card-height: 160px;
+$selected-card-height: 188px;
 
 .card {
 	transition: transform 160ms ease, height 160ms ease;
@@ -58,8 +60,8 @@ $card-height: 184px;
 }
 
 .icon {
-	width: 96px;
-	height: 96px;
+	width: $icon-size;
+	height: $icon-size;
 
 	object-fit: contain;
 	pointer-events: none;
@@ -124,7 +126,7 @@ $card-height: 184px;
 	 * bin glyph. Selection is communicated by enlarging the glyph rather
 	 * than drawing a coloured tile, border, or background around it.
 	 */
-	top: -68px;
+	top: -60px;
 	left: calc(50% + 18px);
 
 	width: 96px;
@@ -185,10 +187,10 @@ $card-height: 184px;
 
 .selected {
 	transform: translateX(3.4px);
-	height: 216px;
+	height: $selected-card-height;
 }
 
 .card.moving {
-	transform: translate(8.7px, -26px) scale(1.045);
-	height: 216px;
+	transform: translate(8.7px, -23px) scale(1.045);
+	height: $selected-card-height;
 }

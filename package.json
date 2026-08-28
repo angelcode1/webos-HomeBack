@@ -1,7 +1,7 @@
 {
   "id": "com.homebrew.homeback",
   "name": "homeback",
-  "version": "0.4.20",
+  "version": "0.4.21",
   "description": "A fast replacement Home launcher and remote-button remapper for rooted LG webOS TVs.",
   "packageManager": "yarn@4.12.0",
   "scripts": {
