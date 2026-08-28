@@ -1,6 +1,6 @@
 # HomeBack
 
-HomeBack is a fast replacement Home launcher for **rooted LG TVs running webOS 6+**. It gives you a compact app ribbon, a scrollable app drawer, quick access to Inputs and remote colour keys, a numeric keypad, and configurable short/long-press remote-button mappings.
+HomeBack is a fast replacement Home launcher for **rooted LG TVs running webOS 6+**. It gives you a compact app ribbon, a scrollable app drawer, quick access to Inputs, a numeric keypad with remote colour keys, and configurable short/long-press remote-button mappings.
 
 HomeBack is designed to feel like part of the TV rather than a separate launcher app:
 
@@ -8,8 +8,7 @@ HomeBack is designed to feel like part of the TV rather than a separate launcher
 - **HOME hold** — open the stock LG Home screen
 - **App drawer** — browse installed apps with the remote D-pad or Magic Remote wheel
 - **Inputs tile** — open the LG input picker
-- **Keypad tile** — open the LG numeric on-screen keyboard and send 0–9 as TV remote key presses
-- **Red / Green / Yellow / Blue tiles** — send the matching LG colour key
+- **Keypad tile** — open HomeBack's compact pad; 0–9 and R/G/Y/B send the matching physical remote key presses
 - **Custom remote mappings** — launch apps, replace keys, ignore keys, run short/long actions, or execute commands
 
 HomeBack includes its own remote-input service, so you **should not run the standalone LG Input Hook app at the same time**.
@@ -32,12 +31,13 @@ The "Setting up HomeBack…" screen is intended for first-time setup only and sh
 
 The built-in utility tiles are placed alongside your apps:
 
-**Inputs → Keypad → Red → Green → Yellow → Blue → Add apps**
+**Inputs → Keypad → Add apps**
 
 - **Inputs** opens the TV input picker.
-- **Keypad** opens the numeric LG on-screen keyboard above the HomeBack tray. Each digit is sent immediately to the TV as the corresponding physical remote number key, so on Live TV it can be used for normal channel-number entry. Press **Back** to dismiss the keypad without leaving HomeBack.
-- **R/G/Y/B** send the corresponding LG remote key.
+- **Keypad** opens a compact pad above the HomeBack tray. Each digit is sent immediately to the TV as the corresponding physical remote number key, so on Live TV it can be used for normal channel-number entry. A four-button **R / G / Y / B** row sits below `0` and sends the corresponding LG colour-key IDs. The in-app pad avoids webOS shifting the tray when the system virtual keyboard opens. Press **Back** to dismiss the keypad without leaving HomeBack.
 - **Add apps** opens the app drawer so you can add or reorder apps on the ribbon.
+
+The ribbon auto-hides after about three seconds of inactivity during normal ribbon browsing. D-pad, wheel, and pointer activity reset the timer. Editing, the app drawer, and the numeric keypad pause auto-hide while you are actively using those modes; closing them resumes the normal three-second inactivity timer.
 
 Use the D-pad or Magic Remote wheel in the app drawer. HomeBack keeps drawer wheel scrolling separate from the ribbon's horizontal scrolling.
 
@@ -221,9 +221,9 @@ HomeBack stands on work from the webOS homebrew community. In particular:
 
 ### About the bundled native hook
 
-HomeBack currently bundles `ezinject` and `libinputhookpp.so` from an **unofficial community build commonly referred to as LG Input Hook 1.5.0**. It was obtained from the webOS community/Discord after the public 1.4.0 project stopped working on newer TVs. The author of those binary modifications and the corresponding modified source are not currently known.
+HomeBack currently bundles `ezinject` and `libinputhookpp.so` from an **unofficial community build commonly referred to as LG Input Hook 1.5.0**. It was obtained from the webOS community/Telegram after the public 1.4.0 project stopped working on newer TVs. The author of those binary modifications and the corresponding modified source are not currently known.
 
-For that reason, HomeBack does **not** claim that the unofficial modified binary itself is authored by HomeBack or automatically covered by HomeBack's GPL-2.0 license. The public LG Input Hook source it descends from is BSD-3-Clause. Exact bundled-binary hashes and provenance notes are kept in [`packages/service/vendor/inputhook/NOTICE.md`](./packages/service/vendor/inputhook/NOTICE.md).
+For that reason, HomeBack does **not** claim that the unofficial modified binary itself is authored by HomeBack or automatically covered by HomeBack's GPL-2.0 license. The public LG Input Hook source it descends from is BSD-3-Clause, but the exact licensing/provenance of the later binary modifications should be independently confirmed before redistribution in a public package repository. Exact bundled-binary hashes and provenance notes are kept in [`packages/service/vendor/inputhook/NOTICE.md`](./packages/service/vendor/inputhook/NOTICE.md).
 
 See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for the licensing breakdown.
 

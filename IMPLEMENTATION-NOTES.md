@@ -1,4 +1,4 @@
-# HomeBack 0.4.14 implementation notes
+# HomeBack 0.4.15 implementation notes
 
 ## App discovery
 
@@ -261,12 +261,69 @@ which means a valid HomeBack mapping introduced by a recovery action can be adop
 without restarting the Node helper.
 
 Verified boot ownership is evaluated only across observed essential targets:
-`lginput2` and `micomservice`. Compatibility targets remain monitored and any conflict
-is still reported, but a foreign hook on `tvservice`, `RELEASE`, or `testapp` no longer
-forces the boot worker to time out when HomeBack fully owns the essential input path.
+`lginput2` and `micomservice`. `tvservice` remains an optional compatibility target, so a
+foreign hook there is still reported but does not force the boot worker to time out when
+HomeBack fully owns the essential input path. Obsolete inherited `RELEASE` and `testapp`
+target names are no longer injected at all.
 
 ESLint discovery is now explicit in every workspace (`--ext .ts,.tsx,.js`) and the
 utils workspace has its own parser/project config. The lint policy no longer relies on
 the archived `eslint-config-airbnb-typescript` package or on JS-only Airbnb rules to
 understand TypeScript. This keeps the release gate meaningful while retaining the
 current TypeScript-ESLint 8 toolchain.
+
+## Numeric keypad and the Magic Remote cursor
+
+Clicking a keypad button makes the Magic Remote pointer shrink and disappear. This is
+webOS behaviour, not a HomeBack defect, and it is not fixable from inside the app.
+
+`micomservice/sendKeycode` emits a genuine TV-side remote command. The compositor cannot
+distinguish it from a physical button press, so it leaves pointer mode and plays the
+cursor hide animation. Pointer mode is re-entered from Magic Remote motion or the wheel,
+which is why moving/scrolling the remote brings the cursor back. Only the keypad sends
+MICOM commands, which is why only the keypad shows this.
+
+A previous revision tried to counter this by calling
+`luna://com.webos.service.mrcu/cursor/setPosition` on `cursorStateChange`. That was
+removed: `com.webos.service.mrcu` is a read-only sensor service in LG's published API
+with no cursor-positioning method, the URI is not covered by the ACGs HomeBack grants
+itself in `bootstrap.ts`, and setting a coordinate would not re-enter pointer mode even
+if it were callable. Both call attempts failed silently in production builds because the
+diagnostic is behind `__DEV__`.
+
+After the first keypad press the pad stays fully operable with the D-pad: `sendKey`
+selects the key it just sent, so arrows and OK continue from the last position.
+
+## Hook log truncation safety
+
+HomeBack intentionally tails and truncates each hook event log through the same
+`O_NOFOLLOW`-opened descriptor instead of reopening a pathname in `/tmp`. The
+remaining question was whether truncating an inode while the injected hook kept
+its own writer descriptor open could leave that writer at a stale offset and
+create a sparse NUL-padded log.
+
+That concern is resolved for the exact native payload bundled with this source.
+`packages/service/vendor/inputhook/libinputhookpp.so` (SHA-256
+`fc1cd1e207e9d0c1fadb3019e340c56ab68b031a77ed207cb3a55b2d8641c084`) contains
+an unstripped `crt_init` that calls `fopen64` with mode `"a"` for the injected
+log. The corresponding public ezinject CRT source likewise uses
+`fopen(log_file_path, "a")`. Append-mode writes target the current end of file,
+so `ftruncate(fd, 0)` does not preserve a stale writer position that can create
+a hole on the next log write.
+
+The descriptor-pinned truncation is therefore retained: it avoids the `/tmp`
+pathname TOCTOU problem while remaining safe with this append-mode hook writer.
+`event-log-tailer.test.ts` includes a separate-writer regression that opens the
+writer before truncation with `O_APPEND`, truncates through the pinned reader,
+and verifies the next write starts at byte zero with no NUL gap. If the bundled
+native payload is ever replaced, its log-open mode must be re-verified as part
+of that binary update.
+
+## Floating-window input region
+
+HomeBack's floating window intentionally uses the compositor's default input
+handling for its full surface. The UI already receives pointer/click input on
+that surface and no code narrows or changes the region at runtime. The stale
+`webOSSystem.window.setInputRegion`/`InputRegion` declaration was therefore
+removed rather than implying that a custom region is required or configured.
+

@@ -1,4 +1,4 @@
-# HomeBack 0.4.14 optimization pass
+# HomeBack 0.4.15 optimization pass
 
 This source tree continues from the previously refactored 0.4.13 source and
 incorporates the follow-up build/device review. The earlier review independently
@@ -137,7 +137,7 @@ edge cases. This source revision applies all concrete findings from that review.
 
 ### Added regression coverage
 
-The unit suite is now **19 tests**. New tests cover essential-target ownership
+The unit suite is now **25 tests**. New tests cover essential-target ownership
 semantics, the non-fatal treatment of non-essential blockers, and the bounded
 injection retry/backoff policy in addition to the earlier adoption/config/icon/path
 coverage.
@@ -157,8 +157,31 @@ coverage.
 
 - Fixed the final `check:full` lint blockers at the ESLint-policy level instead of running an unsafe bulk autofix. The `@typescript-eslint/consistent-type-imports` fixer is disabled because this ESLint/typescript-eslint combination can emit invalid TS2206 mixed type imports. TypeScript false positives from `import/default` and intentional generator adapters are disabled, while real unused-variable and floating-promise checks remain release-gating.
 - Rewrote the four implicit `() => void promise()` timer callbacks as block-bodied callbacks so the existing `no-void` rule remains useful without false positives.
-- The numeric keypad now keeps its hidden focused input in the lower part of the viewport. webOS therefore performs its native keyboard view-area shift and moves the HomeBack tray above the bottom-third virtual keyboard instead of covering it.
-- Physical remote Back (`GoBack` / `BrowserBack` / keycode 461) is captured while the numeric proxy owns focus and dismisses the keyboard without leaving HomeBack. Backspace remains a normal keypad editing key.
+- The numeric keypad is now a HomeBack-owned 3x4 overlay positioned above the tray. It no longer focuses an `<input>`, so the fixed-bottom webOS virtual keyboard cannot shift the entire application upward.
+- Physical remote Back (`GoBack` / `BrowserBack` / keycode 461) dismisses the in-app keypad without leaving HomeBack. D-pad navigation, Enter activation, pointer selection and direct numeric key events are supported.
 - Numeric input is explicitly treated as remote-number emulation: `0-9` map to Linux input keycodes `11,2..10`, are serialized, and have an 80 ms inter-key gap so multi-digit channel entry is delivered as ordered discrete remote presses rather than an LS2 burst.
-- Numeric keypad regression coverage now includes ordered channel-number sequences, Back dismissal recognition, and the inter-key timing constant. The full dependency-free unit suite is now 22 tests.
+- Numeric keypad regression coverage now includes ordered channel-number sequences, Back dismissal recognition, direct digit decoding, D-pad navigation, and the inter-key timing constant. The full dependency-free unit suite is now 25 tests.
 - Added a public-release provenance gate. Local builds and TV deployment remain possible, but `scripts/release.sh` refuses to create public release artifacts until the maintainer explicitly confirms redistribution rights for the exact unofficial native payload described in `THIRD_PARTY_NOTICES.md`. This guard records the unresolved provenance issue rather than pretending a code/license change can resolve unknown third-party rights.
+
+## Review 7 / tray behaviour and keypad layout
+
+- Replaced the system virtual-keyboard proxy with a HomeBack-owned numeric keypad positioned 240 px above the screen bottom, safely above the 216 px maximum selected tray-card height. This avoids the webOS content-shift animation entirely.
+- Added a 3-second inactivity auto-hide for normal ribbon browsing. D-pad, wheel and pointer activity reset the timer; editing, the app drawer, and the numeric keypad pause auto-hide so those interaction modes are never dismissed from under the user.
+- Tray card backgrounds render at 85% opacity while icons and controls remain fully opaque.
+- Wheel activity now feeds the same ribbon inactivity timer so scrolling cannot cause the tray to disappear mid-interaction.
+
+
+## Review 8 / security, lifecycle and maintainability hardening
+
+- Closed the remaining `/tmp` hook-log TOCTOU window by retaining the `O_NOFOLLOW` file descriptor for each log cursor. Polling now uses `fstat`, positioned `read`, and `ftruncate` on the original descriptor, so replacing a pathname with a symlink cannot redirect HomeBack's privileged reads or truncation. The same change eliminates per-poll open/close churn and reuses one bounded read buffer.
+- Added a 15-second `ezinject` watchdog and PID start-time identity checks. A hung injector is killed and enters the existing bounded retry policy, while stale callbacks cannot act on a recycled PID.
+- Config reload identity now uses `mtime:size:inode`, so timestamp-preserving backup restores are detected. Service vendor paths are rooted from runtime `__dirname` rather than process cwd.
+- Completed setup no longer reruns the privileged bootstrap on every HOME press. Normal launches render immediately, query `/remote/status`, and use the idempotent `/remote/start` path only when reconciliation is actually needed. First-run restart failure now falls through to rendering instead of leaving the setup page indefinitely.
+- Fixed subscription executor completion semantics, removed dead press sweeping and unreachable injection throws, and standardized Application Manager Luna URIs.
+- Cached `/proc/<pid>/comm` for live PIDs, discarded stale icon hydration queues on full refresh, and stopped mounting the entire hidden app drawer at startup.
+- Consolidated ribbon, drawer and keypad remote handling into one keyboard dispatcher with an explicit active owner. Vertical navigation no longer emits duplicate semantic events.
+- Hardened launcher ordering so built-in tiles cannot leak into the persisted user order and editing recomputes the selected index in the visible list after moves. Provider errors and blocked remote-hook states are surfaced in the ribbon rather than appearing as a silently empty/healthy launcher.
+- Removed obsolete upstream target names (`testapp`, `RELEASE`) from automatic injection. HomeBack now targets the required `lginput2` / `micomservice` processes plus optional `tvservice` only.
+- Removed remaining dead APIs and stale AltHome workspace package names. The historical `althome:settings` localStorage key is intentionally retained to preserve existing users' tile order.
+- Extracted descriptor-safe event log tailing and action execution from `remote-input.ts`, adding focused regression tests for symlink replacement and `/proc` start-time parsing.
+- Updated the launcher icon so the return arrow has a grey centre with a bright-red outline while retaining the burgundy background and white house.

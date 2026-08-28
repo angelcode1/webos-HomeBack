@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { Intent, parseActivateType } from '../packages/app/src/shared/api/common.ts';
 import { wheelShiftFromDelta } from '../packages/app/src/features/ribbon/services/app-drawer/app-drawer.lib.ts';
+import { RIBBON_AUTO_HIDE_MS } from '../packages/app/src/features/ribbon/services/ribbon/ribbon.lib.ts';
 import {
 	hasCompletedSetup,
 	markSetupComplete,
@@ -45,4 +46,9 @@ test('drawer wheel delta maps to one deterministic selection shift', () => {
 	assert.equal(wheelShiftFromDelta(1), 1);
 	assert.equal(wheelShiftFromDelta(120), 1);
 	assert.equal(wheelShiftFromDelta(Number.NaN), 0);
+});
+
+
+test('ribbon inactivity timeout is three seconds', () => {
+	assert.equal(RIBBON_AUTO_HIDE_MS, 3_000);
 });

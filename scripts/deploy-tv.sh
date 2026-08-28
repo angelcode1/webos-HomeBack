@@ -28,6 +28,7 @@ REMOTE_IPK="/tmp/${APP_ID}_${VERSION}_all.ipk"
 
 echo '[4/8] Closing any running HomeBack instance...'
 ssh "$TV" sh -s -- "$APP_ID" <<'REMOTE'
+set -eu
 APP_ID="$1"
 PAYLOAD="$(printf '{"id":"%s"}' "$APP_ID")"
 luna-send -n 1 -f luna://com.webos.service.applicationManager/closeByAppId "$PAYLOAD" >/dev/null 2>&1 || true

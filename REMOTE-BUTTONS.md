@@ -29,7 +29,7 @@ about one second. A reboot is not required for ordinary mapping changes.
 
 ## Default configuration
 
-Fresh installs of HomeBack 0.4.14 start with:
+Fresh installs of HomeBack 0.4.15 start with:
 
 ```json
 {
@@ -205,6 +205,21 @@ with `params`.
 ```
 
 This makes the physical key behave as the replacement webOS key code.
+
+`remote-buttons.json` always expresses `keycode` values in the Linux/uinput key
+space. The execution path differs by nesting:
+
+- A top-level `replace` is written directly to LG Input Hook and stays in the
+  native uinput key space.
+- A `replace` nested under `short` or `long` is executed by HomeBack's service.
+  HomeBack translates that same uinput value through `micom-keycodes.ts` before
+  calling `micomservice/sendKeycode`, which expects an LG MICOM/IR command byte.
+
+Unsupported nested replacement codes are rejected when the configuration is
+loaded rather than being passed through to MICOM. Do not put raw MICOM bytes in
+`remote-buttons.json`; for example, the Red/Green/Yellow/Blue replacements remain
+Linux `398`/`399`/`400`/`401` in this file and are translated internally to
+MICOM `0x72`/`0x71`/`0x63`/`0x61`.
 
 ### Ignore a key
 

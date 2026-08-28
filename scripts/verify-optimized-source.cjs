@@ -30,7 +30,7 @@ const appinfo = JSON.parse(read('packages/app/manifests/appinfo.json'));
 const defaults = JSON.parse(read('packages/service/vendor/inputhook/remote-buttons.default.json'));
 
 requireInvariant(pkg.id === 'com.homebrew.homeback', 'Unexpected application id');
-requireInvariant(pkg.version === '0.4.14', 'Unexpected application version');
+requireInvariant(pkg.version === '0.4.15', 'Unexpected application version');
 requireInvariant(pkg.license === 'GPL-2.0-only', 'HomeBack source license must remain GPL-2.0-only');
 requireInvariant(exists('THIRD_PARTY_NOTICES.md'), 'Third-party notices missing');
 requireInvariant(exists('scripts/verify-publication.cjs'), 'public-release provenance gate missing');
@@ -106,7 +106,10 @@ requireInvariant(bus.includes('@invariant: palmbus-keepalive'), 'palmbus keepali
 requireInvariant(releaseScript.includes('verify:publication'), 'release script must enforce native-payload publication gate');
 requireInvariant(serviceIndex.includes('@invariant: root-helper-self-start'), 'root helper self-start invariant marker missing');
 requireInvariant(bootstrap.includes('/tmp/homeback-autostart.log'), 'remote-input autostart logging missing');
-requireInvariant(remote.includes('rejectedConfigMtime'), 'invalid config mtime suppression missing');
+requireInvariant(
+	remote.includes('configFingerprint') && remote.includes('rejectedConfigFingerprint') && remote.includes('stat.mtimeMs') && remote.includes('stat.size') && remote.includes('stat.ino'),
+	'config change fingerprint must include mtime, size and inode',
+);
 requireInvariant(remote.includes('verifyInjection'), 'injection verification missing');
 requireInvariant(remote.includes('adoptExistingHook'), 'existing HomeBack hook adoption missing');
 requireInvariant(remote.includes('inspectMappedHook'), 'pre-injection /proc maps inspection missing');
@@ -135,6 +138,23 @@ requireInvariant(appEnv.includes('declare const __DEV__: boolean'), '__DEV__ app
 requireInvariant(appEnv.includes('APP_ID: string') && appEnv.includes('SERVICE_ID: string'), 'app env id globals missing');
 requireInvariant(remote.includes('cleanupTarget'), 'target cleanup lifecycle missing');
 requireInvariant(remote.includes('ACTION_COOLDOWN_MS'), 'duplicate-action cooldown missing');
+requireInvariant(remote.includes('INJECTION_WATCHDOG_MS = 15_000'), '15-second injector watchdog missing');
+requireInvariant(remote.includes('startTimeTicks') && remote.includes('readProcessStartTime'), 'PID start-time identity checks missing');
+requireInvariant(!remote.includes("'testapp'") && !remote.includes("'RELEASE'"), 'obsolete testapp/RELEASE injection targets must remain removed');
+const serviceEnvironment = read('packages/service/src/environment.ts');
+requireInvariant(serviceEnvironment.includes('SERVICE_ROOT_DIR = __dirname'), 'service vendor root must be cwd-independent');
+const eventLogTailer = read('packages/service/src/event-log-tailer.ts');
+requireInvariant(
+	eventLogTailer.includes('fstatSync(cursor.fd)') &&
+	eventLogTailer.includes('readSync(') &&
+	eventLogTailer.includes('ftruncateSync(cursor.fd, 0)') &&
+	!eventLogTailer.includes('openSync('),
+	'event log polling/rotation must remain pinned to retained file descriptors',
+);
+requireInvariant(
+	remote.includes('this.logTailer.add(logPath, eventFd') && remote.includes('O_NOFOLLOW'),
+	'remote hook logs must be created/adopted with nofollow descriptors retained by the tailer',
+);
 const lintCommand = 'eslint --ext .ts,.tsx,.js .';
 requireInvariant(appPkg.scripts?.lint === lintCommand, 'app lint must explicitly cover TypeScript sources');
 requireInvariant(servicePkg.scripts?.lint === lintCommand, 'service lint must explicitly cover TypeScript sources');
@@ -163,37 +183,76 @@ requireInvariant(
 	appIndex.includes('bootstrapHomeBack(() => markSetupComplete(window.localStorage))'),
 	'setup completion must be persisted before any one-time restart request',
 );
+requireInvariant(
+	appIndex.includes('/remote/status') && appIndex.includes('/remote/start') && appIndex.includes('if (setupComplete) {') && appIndex.includes('renderApp();'),
+	'completed setup must render immediately and use the cheap remote status/start path',
+);
+requireInvariant(
+	appIndex.includes('setTimeout(renderApp, 3_000)'),
+	'first-run restart failure fallback must prevent an indefinite setup screen',
+);
 const internalProvider = read('packages/app/src/shared/services/launcher/providers/internal/internal.provider.ts');
 requireInvariant(
 	internalProvider.indexOf("launchPointId: '@button:inputs'") <
 	internalProvider.indexOf("launchPointId: '@button:keypad'") &&
 	internalProvider.indexOf("launchPointId: '@button:keypad'") <
-	internalProvider.indexOf("colorButton('red'"),
-	'Keypad tile must remain immediately after Inputs and before R/G/Y/B',
+	internalProvider.indexOf("launchPointId: '@intent:add_apps'"),
+	'Keypad tile must remain immediately after Inputs and before Add apps',
+);
+requireInvariant(
+	!internalProvider.includes('colorButton(') && !internalProvider.includes("internalAction: 'micomKey'"),
+	'R/G/Y/B must live inside the keypad rather than as standalone ribbon tiles',
 );
 const numericKeyboardProxy = exists('packages/app/src/features/ribbon/ui/numeric-keyboard-proxy/numeric-keyboard-proxy.component.tsx')
 	? read('packages/app/src/features/ribbon/ui/numeric-keyboard-proxy/numeric-keyboard-proxy.component.tsx')
 	: '';
+const numericKeyboardCss = exists('packages/app/src/features/ribbon/ui/numeric-keyboard-proxy/numeric-keyboard-proxy.module.scss')
+	? read('packages/app/src/features/ribbon/ui/numeric-keyboard-proxy/numeric-keyboard-proxy.module.scss')
+	: '';
 requireInvariant(
 	Boolean(numericKeyboardProxy) && numericKeyboardProxy.includes('com.webos.service.micomservice/sendKeycode'),
-	'functional numeric keypad proxy missing',
+	'functional numeric keypad overlay missing',
 );
 requireInvariant(
-	numericKeyboardProxy.includes("type='number'") && numericKeyboardProxy.includes("inputMode='numeric'"),
-	'Keypad must request the webOS numeric on-screen keyboard',
+	!numericKeyboardProxy.includes('<input') && numericKeyboardProxy.includes('NUMERIC_KEYPAD_DIGITS'),
+	'Keypad must remain an in-app numeric overlay rather than invoking the fixed-bottom webOS virtual keyboard',
 );
 requireInvariant(
-	numericKeyboardProxy.includes('bottom: 0') && !numericKeyboardProxy.includes('top: 0'),
-	'Keypad input proxy must remain in the lower screen area so webOS shifts the tray above the virtual keyboard',
+	numericKeyboardProxy.includes('NUMERIC_KEYPAD_COLOURS') &&
+	numericKeyboardCss.includes('.colourRow') &&
+	numericKeyboardCss.includes('grid-template-columns: repeat(4, 1fr)'),
+	'Keypad must include the four-button R/G/Y/B row below the numeric keys',
+);
+const numericKeyboardLib = read('packages/app/src/features/ribbon/ui/numeric-keyboard-proxy/numeric-keyboard.lib.ts');
+requireInvariant(
+	numericKeyboardLib.includes('red: 0x72') &&
+	numericKeyboardLib.includes('green: 0x71') &&
+	numericKeyboardLib.includes('yellow: 0x63') &&
+	numericKeyboardLib.includes('blue: 0x61'),
+	'Keypad colour row must use LG MICOM Red/Green/Yellow/Blue command bytes',
 );
 requireInvariant(
-	numericKeyboardProxy.includes('isRemoteBackKey') && numericKeyboardProxy.includes('dismissOnRemoteBack'),
-	'Keypad must dismiss on physical Back without exiting HomeBack',
+	numericKeyboardCss.includes('bottom: 240px') && numericKeyboardCss.includes('z-index: 5000'),
+	'Numeric keypad must remain positioned above the HomeBack tray',
+);
+requireInvariant(
+	numericKeyboardProxy.includes("registerOwner('keypad'") && numericKeyboardProxy.includes('back: close') && numericKeyboardProxy.includes('closeNumericKeypad'),
+	'Keypad must use the central keyboard owner and dismiss on physical Back without exiting HomeBack',
 );
 requireInvariant(
 	numericKeyboardProxy.includes('NUMERIC_REMOTE_KEY_INTERVAL_MS') &&
 	numericKeyboardProxy.includes('com.webos.service.micomservice/sendKeycode'),
 	'Keypad must serialize real numeric remote-key emulation',
+);
+const keyboardModule = read('packages/app/src/features/ribbon/services/ribbon/ribbon.module.ts');
+const keyboardDispatcher = read('packages/app/src/features/ribbon/services/keyboard/keyboard.service.ts');
+const drawerKeyboardOwner = read('packages/app/src/features/ribbon/services/app-drawer/app-drawer.service.ts');
+requireInvariant(
+	(keyboardModule.match(/new KeyboardService\(\)/g) ?? []).length === 1 &&
+	keyboardDispatcher.includes('private owner: KeyboardOwner') &&
+	drawerKeyboardOwner.includes("registerOwner('drawer'") &&
+	numericKeyboardProxy.includes("registerOwner('keypad'"),
+	'ribbon, drawer and keypad must share one explicit-owner keyboard dispatcher',
 );
 requireInvariant(
 	remote.includes('lastKeyEvent') && remote.includes('lastAction'),
@@ -213,16 +272,58 @@ requireInvariant(
 	drawerCss.includes('flex: 1 1 auto;') && drawerCss.includes('min-height: 0;'),
 	'app drawer flex-scroll constraints missing',
 );
+const ribbonAutoHideService = read('packages/app/src/features/ribbon/services/ribbon/ribbon.service.ts');
+const ribbonLib = read('packages/app/src/features/ribbon/services/ribbon/ribbon.lib.ts');
+requireInvariant(
+	ribbonLib.includes('RIBBON_AUTO_HIDE_MS = 3_000') &&
+	ribbonAutoHideService.includes('scheduleAutoHide') &&
+	ribbonAutoHideService.includes('RIBBON_AUTO_HIDE_MS'),
+	'3-second ribbon inactivity auto-hide missing',
+);
+requireInvariant(
+	ribbonAutoHideService.includes('this.numericKeypadVisible') &&
+	ribbonAutoHideService.includes('this.appDrawerService.visible') &&
+	ribbonAutoHideService.includes('this.moving'),
+	'editing, drawer and numeric keypad must pause ribbon auto-hide',
+);
+const ribbonCardCss = read('packages/app/src/features/ribbon/ui/ribbon-card/ribbon-card.module.scss');
+requireInvariant(
+	ribbonCardCss.includes('opacity: 0.85;'),
+	'tray background must remain at 85% opacity',
+);
 const ribbonService = read('packages/app/src/features/ribbon/services/ribbon/ribbon.service.ts');
 requireInvariant(
-	ribbonService.includes('visible && !drawerVisible'),
-	'ribbon wheel scrolling must be disabled while the app drawer is open',
+	ribbonService.includes('visible && !drawerVisible && !keypadVisible'),
+	'ribbon wheel scrolling must be disabled while the app drawer or keypad owns input',
 );
 const cardCss = read('packages/app/src/features/ribbon/ui/ribbon-card/ribbon-card.module.scss');
 requireInvariant(
 	cardCss.includes('$input-tile-scale: 0.8;'),
 	'Inputs tile 20% width/icon scaling missing',
 );
+requireInvariant(cardCss.includes('.card.moving'), 'moving-card transform must not rely on CSS source ordering');
+const appManagerProvider = read('packages/app/src/shared/services/launcher/providers/app-manager/app-manager.provider.ts');
+requireInvariant(appManagerProvider.includes('this.iconQueue.length = 0'), 'stale icon hydration queue cancellation missing');
+const drawer = read('packages/app/src/features/ribbon/ui/ribbon-app-drawer/ribbon-app-drawer.component.tsx');
+requireInvariant(drawer.includes('{active && <RibbonAppDrawerList />}'), 'hidden app drawer list must not remain mounted at startup');
+const launcherService = read('packages/app/src/shared/services/launcher/model/launcher.service.ts');
+requireInvariant(launcherService.includes('providerErrorCount'), 'launcher provider failure status must be surfaced');
+requireInvariant(launcherService.includes('launchPoint.builtin') && launcherService.includes('nonBuiltinIds'), 'builtin IDs must be excluded from persisted user ordering');
+const ribbonComponent = read('packages/app/src/features/ribbon/ui/ribbon/ribbon.component.tsx');
+requireInvariant(ribbonComponent.includes('service.warningText'), 'user-visible remote/provider warning missing');
+requireInvariant(appPkg.name === '@homeback/app' && servicePkg.name === '@homeback/service' && utilsPkg.name === '@homeback/utils', 'HomeBack workspace package names regressed');
+requireInvariant(read('packages/app/src/shared/services/settings/model/settings.service.ts').includes('althome:settings'), 'legacy settings key must remain stable to preserve user tile order');
+const deployScript = read('scripts/deploy-tv.sh');
+requireInvariant(deployScript.includes("<<'REMOTE'\nset -eu"), 'deploy remote heredoc must fail safely with set -eu');
+requireInvariant(
+	iconSvg.indexOf('stroke="#FF0844" stroke-width="34"') >= 0 &&
+	iconSvg.indexOf('stroke="#6B6B6B" stroke-width="22"') >= 0,
+	'launcher arrow must keep a grey centre with bright-red outline',
+);
+const commonApi = read('packages/app/src/shared/api/common.ts');
+requireInvariant(commonApi.includes('APPLICATION_MANAGER_URI'), 'Application Manager Luna URI constant missing');
+requireInvariant(!read('packages/service/src/remote-input.ts').includes('sweepActivePresses'), 'dead active-press sweep must remain removed');
+requireInvariant(!read('packages/app/src/features/ribbon/ui/numeric-keyboard-proxy/numeric-keyboard.lib.ts').includes('numericMicomKeycodes'), 'dead plural numeric keycode helper must remain removed');
 
 if (errors.length > 0) {
 	console.error('Optimized source verification failed:');

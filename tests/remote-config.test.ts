@@ -57,3 +57,23 @@ test('timed mappings become native ignore while pass is omitted', () => {
 		'3': { action: 'replace', keycode: 4 },
 	});
 });
+
+test('timed replace rejects uinput codes that cannot be translated to MICOM', () => {
+	assert.equal(validateConfig({
+		version: 1,
+		keys: {
+			773: {
+				short: { action: 'replace', keycode: 0x7fffffff },
+			},
+		},
+	}), false);
+});
+
+test('top-level native replace retains the wider uinput keycode space', () => {
+	assert.equal(validateConfig({
+		version: 1,
+		keys: {
+			362: { action: 'replace', keycode: 1037 },
+		},
+	}), true);
+});

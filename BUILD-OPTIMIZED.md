@@ -1,6 +1,6 @@
-# HomeBack 0.4.14 optimized build
+# HomeBack 0.4.15 optimized build
 
-HomeBack 0.4.14 uses application ID `com.homebrew.homeback` and service ID
+HomeBack 0.4.15 uses application ID `com.homebrew.homeback` and service ID
 `com.homebrew.homeback.service`.
 
 ## Build on macOS/Linux
@@ -29,7 +29,7 @@ corepack yarn install --immutable
 Expected package:
 
 ```bash
-ls -lh dist/com.homebrew.homeback_0.4.14_all.ipk
+ls -lh dist/com.homebrew.homeback_0.4.15_all.ipk
 ```
 
 Deploy:
