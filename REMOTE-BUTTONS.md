@@ -25,12 +25,12 @@ HomeBack watches `remote-buttons.json` and normally reloads changes within
 about one second. A reboot is not required for ordinary mapping changes.
 
 > Existing installations keep their configured short/long actions. Starting with
-> HomeBack 0.4.16, the three known stale shipped labels are corrected when they still
+> HomeBack 0.4.17, the three known stale shipped labels are corrected when they still
 > exactly match the old labels; custom labels and actions are left unchanged.
 
 ## Default configuration
 
-Fresh installs of HomeBack 0.4.16 start with:
+Fresh installs of HomeBack 0.4.17 start with:
 
 ```json
 {
