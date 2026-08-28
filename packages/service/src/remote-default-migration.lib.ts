@@ -68,15 +68,15 @@ const isTimedMapping = (mapping: RemoteMapping): mapping is TimedMapping =>
 const matchesShortcutState = (
 	mapping: RemoteMapping | undefined,
 	state: ShortcutState,
-): mapping is TimedMapping =>
-	Boolean(mapping) &&
-	isTimedMapping(mapping as RemoteMapping) &&
-	mapping?.label === state.label &&
-	mapping.short?.action === 'launch' &&
-	mapping.short.id === state.shortId &&
-	mapping.short.params === undefined &&
-	mapping.long?.action === 'replace' &&
-	mapping.long.keycode === state.longKeycode;
+): mapping is TimedMapping => {
+	if (!mapping || !isTimedMapping(mapping)) return false;
+	return mapping.label === state.label &&
+		mapping.short?.action === 'launch' &&
+		mapping.short.id === state.shortId &&
+		mapping.short.params === undefined &&
+		mapping.long?.action === 'replace' &&
+		mapping.long.keycode === state.longKeycode;
+};
 
 const repairBad0416Rotation = (config: RemoteConfig): boolean => {
 	const affectedKeys = Object.keys(BAD_0416_ROTATION);
