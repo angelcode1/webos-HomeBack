@@ -25,6 +25,8 @@ jobs:
         run: |
           python -m py_compile .github/scripts/materialize-v0.4.16.py
           python .github/scripts/materialize-v0.4.16.py
+          python -m py_compile .github/scripts/fix-v0.4.16-test-seam.py
+          python .github/scripts/fix-v0.4.16-test-seam.py
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -62,6 +64,7 @@ jobs:
         run: |
           rm .github/workflows/materialize-v0.4.16.yml
           rm .github/scripts/materialize-v0.4.16.py
+          rm .github/scripts/fix-v0.4.16-test-seam.py
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
