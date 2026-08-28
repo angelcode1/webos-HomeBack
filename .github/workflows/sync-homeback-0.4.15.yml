@@ -95,12 +95,11 @@ jobs:
           done < /tmp/homeback-expected.manifest
 
           awk '{ $1=""; $2=""; sub(/^  */, ""); print }' /tmp/homeback-expected.manifest > /tmp/expected-paths
-          cat >> /tmp/expected-paths <<'EOF'
-.github/workflows/release.yml
-scripts/fix-ipk-installed-size.sh
-scripts/generate-manifest.cjs
-yarn.lock
-EOF
+          printf '%s\n' \
+            '.github/workflows/release.yml' \
+            'scripts/fix-ipk-installed-size.sh' \
+            'scripts/generate-manifest.cjs' \
+            'yarn.lock' >> /tmp/expected-paths
           sort -u /tmp/expected-paths -o /tmp/expected-paths
           git ls-files | sort -u > /tmp/actual-paths
           if ! diff -u /tmp/expected-paths /tmp/actual-paths; then
