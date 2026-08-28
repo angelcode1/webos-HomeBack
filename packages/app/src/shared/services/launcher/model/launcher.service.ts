@@ -157,6 +157,7 @@ export class LauncherService implements LaunchPointActions {
 	}
 
 	private set order(value: string[]) {
+		if (!this.fulfilled) return;
 		const nonBuiltinIds = new Set(
 			this.launchPoints.filter(item => !item.builtin).map(item => item.launchPointId),
 		);
