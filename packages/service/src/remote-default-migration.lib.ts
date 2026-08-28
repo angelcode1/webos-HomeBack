@@ -79,14 +79,12 @@ const matchesShortcutState = (
 };
 
 const repairBad0416Rotation = (config: RemoteConfig): boolean => {
-	const affectedKeys = Object.keys(BAD_0416_ROTATION);
-	const isExactBadRotation = affectedKeys.every(key =>
-		matchesShortcutState(config.keys[key], BAD_0416_ROTATION[key]),
-	);
-	if (!isExactBadRotation) return false;
+	let changed = false;
 
-	for (const key of affectedKeys) {
-		const mapping = config.keys[key] as TimedMapping;
+	for (const [key, badState] of Object.entries(BAD_0416_ROTATION)) {
+		const mapping = config.keys[key];
+		if (!matchesShortcutState(mapping, badState)) continue;
+
 		const restored = RESTORED_SHORTCUTS[key];
 		config.keys[key] = {
 			...mapping,
@@ -94,8 +92,10 @@ const repairBad0416Rotation = (config: RemoteConfig): boolean => {
 			short: { action: 'launch', id: restored.shortId },
 			long: { action: 'replace', keycode: restored.longKeycode },
 		};
+		changed = true;
 	}
-	return true;
+
+	return changed;
 };
 
 export const migrateDefaultRemoteShortcuts = (config: RemoteConfig): boolean => {

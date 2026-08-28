@@ -79,7 +79,6 @@ test('top-level native replace retains the wider uinput keycode space', () => {
 	}), true);
 });
 
-
 test('bundled shortcut defaults correct labels without changing configured actions', () => {
 	const defaults = JSON.parse(fs.readFileSync(defaultsPath, 'utf8'));
 	assert.deepEqual(defaults.keys['1043'], {
@@ -183,7 +182,7 @@ test('migration repairs the exact bad 0.4.16 shortcut rotation', () => {
 	});
 });
 
-test('migration does not rewrite a partial or customized 0.4.16-like state', () => {
+test('migration repairs known bad keys independently while preserving customized keys', () => {
 	const config = {
 		version: 1 as const,
 		keys: {
@@ -204,8 +203,21 @@ test('migration does not rewrite a partial or customized 0.4.16-like state', () 
 			},
 		},
 	};
-	const before = structuredClone(config);
 
-	assert.equal(migrateDefaultRemoteShortcuts(config), false);
-	assert.deepEqual(config, before);
+	assert.equal(migrateDefaultRemoteShortcuts(config), true);
+	assert.deepEqual(config.keys['1043'], {
+		label: 'LG Channels button',
+		short: { action: 'launch', id: 'com.webos.app.hdmi3' },
+		long: { action: 'replace', keycode: 399 },
+	});
+	assert.deepEqual(config.keys['1086'], {
+		label: 'Alexa button',
+		short: { action: 'launch', id: 'youtube.leanback.v4' },
+		long: { action: 'replace', keycode: 401 },
+	});
+	assert.deepEqual(config.keys['1111'], {
+		label: 'Model-specific button (observed keycode 1111)',
+		short: { action: 'launch', id: 'cdp-30' },
+		long: { action: 'replace', keycode: 401 },
+	});
 });
