@@ -18,24 +18,40 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v7
+
+      - name: Verify release workflow is manual-only
+        run: |
+          grep -q '^  workflow_dispatch:' .github/workflows/release.yml
+          if grep -q '^  push:' .github/workflows/release.yml; then
+            echo 'release.yml must not publish from push or tag events'
+            exit 1
+          fi
+          grep -q '^      confirmation:' .github/workflows/release.yml
+          grep -q 'confirmation must be exactly PUBLISH' .github/workflows/release.yml
+
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
           node-version: '22'
           package-manager-cache: false
+
       - name: Enable Corepack
         run: |
           corepack enable
           corepack prepare yarn@4.12.0 --activate
           yarn --version
+
       - name: Install dependencies
         run: yarn install --immutable
+
       - name: Verify source
         run: yarn check:full
+
       - name: Build production IPK
         run: |
           rm -rf dist
           yarn build
+
       - name: Validate IPK exists
         run: |
           VERSION="$(node -p "require('./package.json').version")"
