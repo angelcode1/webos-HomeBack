@@ -30,7 +30,7 @@ const appinfo = JSON.parse(read('packages/app/manifests/appinfo.json'));
 const defaults = JSON.parse(read('packages/service/vendor/inputhook/remote-buttons.default.json'));
 
 requireInvariant(pkg.id === 'com.homebrew.homeback', 'Unexpected application id');
-requireInvariant(pkg.version === '0.4.15', 'Unexpected application version');
+requireInvariant(pkg.version === '0.4.16', 'Unexpected application version');
 requireInvariant(pkg.license === 'GPL-2.0-only', 'HomeBack source license must remain GPL-2.0-only');
 requireInvariant(exists('THIRD_PARTY_NOTICES.md'), 'Third-party notices missing');
 requireInvariant(exists('scripts/verify-publication.cjs'), 'public-release provenance gate missing');
@@ -236,8 +236,8 @@ requireInvariant(
 	'Numeric keypad must remain positioned above the HomeBack tray',
 );
 requireInvariant(
-	numericKeyboardProxy.includes("registerOwner('keypad'") && numericKeyboardProxy.includes('back: close') && numericKeyboardProxy.includes('closeNumericKeypad'),
-	'Keypad must use the central keyboard owner and dismiss on physical Back without exiting HomeBack',
+	numericKeyboardProxy.includes("registerOwner('keypad'") && numericKeyboardProxy.includes("unregisterOwner('keypad'") && numericKeyboardProxy.includes('back: close') && numericKeyboardProxy.includes('closeNumericKeypad'),
+	'Keypad must use the central keyboard owner, unregister on unmount, and dismiss on physical Back without exiting HomeBack',
 );
 requireInvariant(
 	numericKeyboardProxy.includes('NUMERIC_REMOTE_KEY_INTERVAL_MS') &&
@@ -250,6 +250,7 @@ const drawerKeyboardOwner = read('packages/app/src/features/ribbon/services/app-
 requireInvariant(
 	(keyboardModule.match(/new KeyboardService\(\)/g) ?? []).length === 1 &&
 	keyboardDispatcher.includes('private owner: KeyboardOwner') &&
+	keyboardDispatcher.includes('unregisterOwner(owner: KeyboardOwner)') &&
 	drawerKeyboardOwner.includes("registerOwner('drawer'") &&
 	numericKeyboardProxy.includes("registerOwner('keypad'"),
 	'ribbon, drawer and keypad must share one explicit-owner keyboard dispatcher',
@@ -296,6 +297,10 @@ requireInvariant(
 	ribbonService.includes('visible && !drawerVisible && !keypadVisible'),
 	'ribbon wheel scrolling must be disabled while the app drawer or keypad owns input',
 );
+requireInvariant(
+	ribbonService.includes('remoteHealthInterval') && ribbonService.includes('clearInterval(this.remoteHealthInterval)'),
+	'remote-health polling must remain disposable',
+);
 const cardCss = read('packages/app/src/features/ribbon/ui/ribbon-card/ribbon-card.module.scss');
 requireInvariant(
 	cardCss.includes('$input-tile-scale: 0.8;'),
@@ -309,10 +314,15 @@ requireInvariant(drawer.includes('{active && <RibbonAppDrawerList />}'), 'hidden
 const launcherService = read('packages/app/src/shared/services/launcher/model/launcher.service.ts');
 requireInvariant(launcherService.includes('providerErrorCount'), 'launcher provider failure status must be surfaced');
 requireInvariant(launcherService.includes('launchPoint.builtin') && launcherService.includes('nonBuiltinIds'), 'builtin IDs must be excluded from persisted user ordering');
+requireInvariant(launcherService.includes('if (!this.fulfilled) return;'), 'launcher order writes must be blocked while providers are loading');
 const ribbonComponent = read('packages/app/src/features/ribbon/ui/ribbon/ribbon.component.tsx');
 requireInvariant(ribbonComponent.includes('service.warningText'), 'user-visible remote/provider warning missing');
 requireInvariant(appPkg.name === '@homeback/app' && servicePkg.name === '@homeback/service' && utilsPkg.name === '@homeback/utils', 'HomeBack workspace package names regressed');
-requireInvariant(read('packages/app/src/shared/services/settings/model/settings.service.ts').includes('althome:settings'), 'legacy settings key must remain stable to preserve user tile order');
+const settingsService = read('packages/app/src/shared/services/settings/model/settings.service.ts');
+requireInvariant(
+	settingsService.includes("const KEY = 'homeback:settings'") && settingsService.includes("const LEGACY_KEY = 'althome:settings'"),
+	'HomeBack settings key rename must preserve migration from the legacy althome key',
+);
 const deployScript = read('scripts/deploy-tv.sh');
 requireInvariant(deployScript.includes("<<'REMOTE'\nset -eu"), 'deploy remote heredoc must fail safely with set -eu');
 requireInvariant(
@@ -324,6 +334,8 @@ const commonApi = read('packages/app/src/shared/api/common.ts');
 requireInvariant(commonApi.includes('APPLICATION_MANAGER_URI'), 'Application Manager Luna URI constant missing');
 requireInvariant(!read('packages/service/src/remote-input.ts').includes('sweepActivePresses'), 'dead active-press sweep must remain removed');
 requireInvariant(!read('packages/app/src/features/ribbon/ui/numeric-keyboard-proxy/numeric-keyboard.lib.ts').includes('numericMicomKeycodes'), 'dead plural numeric keycode helper must remain removed');
+requireInvariant(!exists('packages/app/src/assets/plus.png'), 'obsolete opaque plus.png must remain removed');
+requireInvariant(!cardCss.includes('.colourCard') && !cardCss.includes('.colourIcon'), 'obsolete ribbon colour-card styles must remain removed');
 
 if (errors.length > 0) {
 	console.error('Optimized source verification failed:');
