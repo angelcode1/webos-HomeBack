@@ -45,6 +45,35 @@ export const isKeycode = (value: unknown): value is number =>
 	value >= 0 &&
 	value <= MAX_KEYCODE;
 
+const TIMED_REPLACE_NON_DIGIT_KEYCODES = new Set([
+	28, // KEY_ENTER
+	103, // KEY_UP
+	105, // KEY_LEFT
+	106, // KEY_RIGHT
+	108, // KEY_DOWN
+	113, // KEY_MUTE
+	114, // KEY_VOLUMEDOWN
+	115, // KEY_VOLUMEUP
+	116, // KEY_POWER
+	398, // KEY_RED
+	399, // KEY_GREEN
+	400, // KEY_YELLOW
+	401, // KEY_BLUE
+	402, // KEY_CHANNELUP
+	403, // KEY_CHANNELDOWN
+	412, // KEY_PREVIOUS / BACK
+]);
+
+/**
+ * Timed replace actions are executed through micomservice rather than the
+ * native uinput hook, so only uinput codes with an explicit MICOM translation
+ * are valid here. Keep this predicate in lockstep with micom-keycodes.ts; the
+ * regression suite compares the two across the supported range.
+ */
+export const isTimedReplaceKeycode = (value: unknown): value is number =>
+	isKeycode(value) &&
+	((value >= 2 && value <= 11) || TIMED_REPLACE_NON_DIGIT_KEYCODES.has(value));
+
 const isDuration = (value: unknown): value is number =>
 	typeof value === 'number' &&
 	Number.isInteger(value) &&
@@ -63,7 +92,7 @@ export const validateAction = (action: unknown): action is SemanticAction => {
 		case 'exec':
 			return isNonEmptyString(action.command);
 		case 'replace':
-			return isKeycode(action.keycode);
+			return isTimedReplaceKeycode(action.keycode);
 		default:
 			return false;
 	}

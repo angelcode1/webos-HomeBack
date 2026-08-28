@@ -16,12 +16,8 @@ export class Message<T extends Record<string, any>> {
 	}
 
 	public get payload(): T {
-		if (this.parsedPayload === null) this.parsedPayload = JSON.parse(this.rawPayload) as T;
+		if (this.parsedPayload === null) this.parsedPayload = JSON.parse(this.pMessage.payload()) as T;
 		return this.parsedPayload;
-	}
-
-	public get rawPayload(): string {
-		return this.pMessage.payload();
 	}
 
 	public respond(message: Record<string, any>): void {

@@ -1,6 +1,6 @@
 import palmbus from 'palmbus';
 
-import { AsyncSink } from '@althome/utils';
+import { AsyncSink } from '@homeback/utils';
 
 import { SERVICE_ID } from '../environment';
 import { Message } from './message';
@@ -129,13 +129,19 @@ export class Service {
 		generator: ReturnType<Executor<any, any>>,
 		message: Message<any>,
 	): Promise<void> {
-		let result: IteratorResult<any>;
-
-		do {
-			result = await generator.next();
-			if (message.isSubscription || result.done) {
+		while (true) {
+			const result = await generator.next();
+			if (result.done) {
+				// A subscribed stream already replied for each yielded value. Do not send
+				// an extra bare {returnValue:true} when the generator completes.
+				if (!message.isSubscription) {
+					message.respond({ returnValue: true, ...result.value });
+				}
+				return;
+			}
+			if (message.isSubscription) {
 				message.respond({ returnValue: true, ...result.value });
 			}
-		} while (!result.done);
+		}
 	}
 }

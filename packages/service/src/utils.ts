@@ -3,7 +3,7 @@ import { promises } from 'fs';
 import { dirname } from 'path';
 import process from 'process';
 
-export class ProcessExitError extends Error {
+class ProcessExitError extends Error {
 	public constructor(
 		public readonly command: string,
 		public readonly code: number | null,
@@ -14,7 +14,7 @@ export class ProcessExitError extends Error {
 	}
 }
 
-export const readFile = (path: string): Promise<string> =>
+const readFile = (path: string): Promise<string> =>
 	promises.readFile(path, { encoding: 'utf8' });
 
 export const writeFile = async (
@@ -53,7 +53,7 @@ export const writeJson = <T>(path: string, content: T, mode?: number): Promise<v
 export const getUid = (): number =>
 	typeof process.getuid === 'function' ? process.getuid() : -1;
 
-export const asyncSpawn = (bin: string, args: string[] = []): Promise<void> =>
+const asyncSpawn = (bin: string, args: string[] = []): Promise<void> =>
 	new Promise((resolve, reject) => {
 		const child = spawn(bin, args, { stdio: 'inherit' });
 		let settled = false;

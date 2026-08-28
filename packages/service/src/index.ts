@@ -1,6 +1,6 @@
 import { Service, ServiceError } from './bus';
 import { readLaunchPointIcon, type IconRequest } from './app-catalog';
-import { APP_ID } from './environment';
+import { APPLICATION_MANAGER_URI, APP_ID } from './environment';
 import { HomeBackBootstrap } from './bootstrap';
 import { getUid } from './utils';
 
@@ -48,7 +48,7 @@ service.registerSimple('/restartApp', () => {
 	setTimeout(() => {
 		void (async () => {
 			try {
-				await service.oneshot('luna://com.webos.applicationManager/closeByAppId', { id: APP_ID });
+				await service.oneshot(`${APPLICATION_MANAGER_URI}/closeByAppId`, { id: APP_ID });
 			} catch {
 				// App may already be gone.
 			}
@@ -56,7 +56,7 @@ service.registerSimple('/restartApp', () => {
 			await new Promise(resolve => setTimeout(resolve, 400));
 
 			try {
-				await service.oneshot('luna://com.webos.applicationManager/launch', { id: APP_ID });
+				await service.oneshot(`${APPLICATION_MANAGER_URI}/launch`, { id: APP_ID });
 			} catch (error) {
 				console.error('Unable to relaunch HomeBack after ACG bootstrap:', error);
 			}
