@@ -7,6 +7,8 @@ import s from './preview-input-probe.module.scss';
 
 const PROBE_DURATION_MS = 30_000;
 const SNAPSHOT_INTERVAL_MS = 250;
+const FOCUS_RELEASE_FALLBACK_MS = 250;
+const FOCUS_RELEASE_CHECK_MS = 100;
 const RECENT_EVENT_LIMIT = 10;
 
 type ProbeCounter =
@@ -43,6 +45,7 @@ export const PreviewInputProbe = ({
 	activation,
 	onComplete,
 }: PreviewInputProbeProps): JSX.Element => {
+	const releaseFocus = activation.releaseFocus === true;
 	const countsRef = useRef<ProbeCounts>(createCounts());
 	const recentEventsRef = useRef<string[]>([]);
 	const [counts, setCounts] = useState<ProbeCounts>(createCounts);
@@ -55,6 +58,10 @@ export const PreviewInputProbe = ({
 		let lastMouseLogMs = 0;
 		let lastPointerLogMs = 0;
 		let secondPaintFrame: number | null = null;
+		let focusReleaseFrame: number | null = null;
+		let focusReleaseFallbackTimer: number | null = null;
+		let focusReleaseCheckTimer: number | null = null;
+		let focusReleaseRequested = false;
 		const startedAtMs = Date.now();
 		const performanceStartedAtMs = performance.now();
 		const expiresAtMs = startedAtMs + PROBE_DURATION_MS;
@@ -66,6 +73,28 @@ export const PreviewInputProbe = ({
 			const line = `${elapsed}ms ${kind}${detail ? ` ${detail}` : ''}`;
 			recentEventsRef.current = [line, ...recentEventsRef.current].slice(0, RECENT_EVENT_LIMIT);
 			console.warn(`[HomeBackPreviewProbe] ${line}`);
+		};
+
+		const requestWindowFocusRelease = (reason: string): void => {
+			if (!releaseFocus || focusReleaseRequested) return;
+			focusReleaseRequested = true;
+			console.warn(
+				`[HomeBackPreviewProbe] focus-release request reason=${reason} ` +
+					`focusedBefore=${document.hasFocus()} visibilityState=${document.visibilityState}`,
+			);
+			try {
+				webOSSystem.window.setFocus(false);
+			} catch (error) {
+				console.warn('[HomeBackPreviewProbe] focus-release threw', error);
+				return;
+			}
+			focusReleaseCheckTimer = window.setTimeout(() => {
+				focusReleaseCheckTimer = null;
+				console.warn(
+					`[HomeBackPreviewProbe] focus-release result focused=${document.hasFocus()} ` +
+						`visibilityState=${document.visibilityState}`,
+				);
+			}, FOCUS_RELEASE_CHECK_MS);
 		};
 
 		const handleKeyDown = (event: KeyboardEvent): void => {
@@ -110,7 +139,17 @@ export const PreviewInputProbe = ({
 		const handleClick = (event: MouseEvent): void => {
 			record('click', `button=${event.button} x=${event.clientX} y=${event.clientY}`);
 		};
-		const handleFocus = (): void => record('focus');
+		const handleFocus = (): void => {
+			record('focus');
+			if (releaseFocus && !focusReleaseRequested && focusReleaseFrame === null) {
+				// Let the compositor finish the activate/focus transition, then ask
+				// webOS to drop this floating window's focus without hiding it.
+				focusReleaseFrame = window.requestAnimationFrame(() => {
+					focusReleaseFrame = null;
+					requestWindowFocusRelease('focus-event');
+				});
+			}
+		};
 		const handleBlur = (): void => record('blur');
 		const handleVisibilityChange = (): void => {
 			record('visibilitychange', `state=${document.visibilityState}`);
@@ -134,12 +173,23 @@ export const PreviewInputProbe = ({
 			`[HomeBackPreviewProbe] start epochMs=${startedAtMs} ` +
 				`performanceNowMs=${performanceStartedAtMs.toFixed(1)} ` +
 				`timeOriginMs=${performance.timeOrigin} navigationStartMs=${performance.timing.navigationStart} ` +
-				`activation=${JSON.stringify(activation)} launchReason=${JSON.stringify(webOSSystem.launchReason)} ` +
+				`activation=${JSON.stringify(activation)} releaseFocus=${releaseFocus} ` +
+				`launchReason=${JSON.stringify(webOSSystem.launchReason)} ` +
 				`visibilityState=${document.visibilityState} focused=${document.hasFocus()} ` +
 				`sdkVersion=${JSON.stringify(systemInfoService.sdkVersion)} ` +
 				`firmwareVersion=${JSON.stringify(systemInfoService.firmwareVersion)} ` +
 				`modelName=${JSON.stringify(systemInfoService.modelName)}`,
 		);
+
+		if (releaseFocus) {
+			// The normal C5 run produced a focus event ~72 ms after activate(). This
+			// fallback covers firmware where focus was already established before the
+			// listener ran or where the browser doesn't dispatch a focus event.
+			focusReleaseFallbackTimer = window.setTimeout(() => {
+				focusReleaseFallbackTimer = null;
+				requestWindowFocusRelease('fallback');
+			}, FOCUS_RELEASE_FALLBACK_MS);
+		}
 
 		const firstPaintFrame = window.requestAnimationFrame(() => {
 			secondPaintFrame = window.requestAnimationFrame(() => {
@@ -175,6 +225,9 @@ export const PreviewInputProbe = ({
 			clearTimeout(expiryTimer);
 			window.cancelAnimationFrame(firstPaintFrame);
 			if (secondPaintFrame !== null) window.cancelAnimationFrame(secondPaintFrame);
+			if (focusReleaseFrame !== null) window.cancelAnimationFrame(focusReleaseFrame);
+			if (focusReleaseFallbackTimer !== null) clearTimeout(focusReleaseFallbackTimer);
+			if (focusReleaseCheckTimer !== null) clearTimeout(focusReleaseCheckTimer);
 			window.removeEventListener('keydown', handleKeyDown, true);
 			window.removeEventListener('keyup', handleKeyUp, true);
 			window.removeEventListener('wheel', handleWheel, true);
@@ -185,12 +238,14 @@ export const PreviewInputProbe = ({
 			window.removeEventListener('focus', handleFocus, true);
 			window.removeEventListener('blur', handleBlur, true);
 		};
-	}, [activation, onComplete]);
+	}, [activation, onComplete, releaseFocus]);
 
 	return (
 		<section className={s.probe} aria-label='HomeBack preview input probe'>
 			<div className={s.heading}>HomeBack Preview Input Probe</div>
-			<div className={s.warning}>30 s · logging only · no input consumption</div>
+			<div className={s.warning}>
+				30 s · logging only · {releaseFocus ? 'release window focus' : 'keep activated focus'}
+			</div>
 			<div className={s.status}>
 				<span>Remaining: {remainingSeconds}s</span>
 				<span>Focus: {focused ? 'yes' : 'no'}</span>
