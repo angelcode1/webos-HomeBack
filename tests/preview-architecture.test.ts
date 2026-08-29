@@ -5,7 +5,7 @@ import { keyboardOwnerFor, surfaceVisibleFor } from '../packages/app/src/app/app
 import {
 	activationActionFrom,
 	parsePreviewRequest,
-} from '../packages/app/src/shared/services/activation/model/activation.service.ts';
+} from '../packages/app/src/shared/services/activation/model/activation.lib.ts';
 import {
 	clampPreviewDuration,
 	PREVIEW_DEFAULT_DURATION_MS,
@@ -17,7 +17,11 @@ const previewUrl = 'http://camera.local/stream.mjpeg';
 
 test('preview activation is opt-in interactive and validates its URL', () => {
 	assert.deepEqual(
-		activationActionFrom({ intent: 'homeback:preview', preview: { url: previewUrl } }, undefined, false),
+		activationActionFrom(
+			{ intent: 'homeback:preview', preview: { url: previewUrl } },
+			undefined,
+			false,
+		),
 		{ type: 'none' },
 	);
 	assert.deepEqual(
@@ -45,9 +49,18 @@ test('preview activation is opt-in interactive and validates its URL', () => {
 });
 
 test('cold and warm launcher activation semantics stay distinct', () => {
-	assert.deepEqual(activationActionFrom({ intent: 'homeback:show' }, undefined, true), { type: 'showLauncher' });
-	assert.deepEqual(activationActionFrom({ intent: 'homeback:show' }, undefined, false), { type: 'toggleLauncher' });
-	assert.deepEqual(activationActionFrom({ activateType: 'home' }, undefined, false), { type: 'toggleLauncher' });
+	assert.deepEqual(
+		activationActionFrom({ intent: 'homeback:show' }, undefined, true),
+		{ type: 'showLauncher' },
+	);
+	assert.deepEqual(
+		activationActionFrom({ intent: 'homeback:show' }, undefined, false),
+		{ type: 'toggleLauncher' },
+	);
+	assert.deepEqual(
+		activationActionFrom({ activateType: 'home' }, undefined, false),
+		{ type: 'toggleLauncher' },
+	);
 	assert.deepEqual(activationActionFrom({}, 'preload', true), { type: 'none' });
 	assert.deepEqual(activationActionFrom({}, undefined, true), { type: 'showLauncher' });
 });
@@ -69,9 +82,34 @@ test('surface visibility is the union of launcher and preview visibility', () =>
 });
 
 test('keyboard priority is keypad then drawer then ribbon then preview', () => {
-	assert.equal(keyboardOwnerFor({ ribbonVisible: false, drawerVisible: false, keypadVisible: false, previewVisible: false }), null);
-	assert.equal(keyboardOwnerFor({ ribbonVisible: false, drawerVisible: false, keypadVisible: false, previewVisible: true }), 'preview');
-	assert.equal(keyboardOwnerFor({ ribbonVisible: true, drawerVisible: false, keypadVisible: false, previewVisible: true }), 'ribbon');
-	assert.equal(keyboardOwnerFor({ ribbonVisible: true, drawerVisible: true, keypadVisible: false, previewVisible: true }), 'drawer');
-	assert.equal(keyboardOwnerFor({ ribbonVisible: true, drawerVisible: true, keypadVisible: true, previewVisible: true }), 'keypad');
+	assert.equal(keyboardOwnerFor({
+		ribbonVisible: false,
+		drawerVisible: false,
+		keypadVisible: false,
+		previewVisible: false,
+	}), null);
+	assert.equal(keyboardOwnerFor({
+		ribbonVisible: false,
+		drawerVisible: false,
+		keypadVisible: false,
+		previewVisible: true,
+	}), 'preview');
+	assert.equal(keyboardOwnerFor({
+		ribbonVisible: true,
+		drawerVisible: false,
+		keypadVisible: false,
+		previewVisible: true,
+	}), 'ribbon');
+	assert.equal(keyboardOwnerFor({
+		ribbonVisible: true,
+		drawerVisible: true,
+		keypadVisible: false,
+		previewVisible: true,
+	}), 'drawer');
+	assert.equal(keyboardOwnerFor({
+		ribbonVisible: true,
+		drawerVisible: true,
+		keypadVisible: true,
+		previewVisible: true,
+	}), 'keypad');
 });
