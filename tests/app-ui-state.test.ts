@@ -30,10 +30,14 @@ test('setup-complete marker persists successful first setup', () => {
 	assert.equal(hasCompletedSetup(storage), true);
 });
 
-test('show launch intent is parsed without making malformed params fatal', () => {
+test('launch intents are parsed without making malformed params fatal', () => {
 	assert.equal(
 		parseActivateType('{"intent":"homeback:show"}').intent,
 		Intent.ShowHomeBack,
+	);
+	assert.equal(
+		parseActivateType('{"intent":"homeback:preview"}').intent,
+		Intent.PreviewInputProbe,
 	);
 	assert.deepEqual(parseActivateType('not-json'), {});
 	assert.deepEqual(parseActivateType('[]'), {});
