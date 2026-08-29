@@ -90,6 +90,10 @@ export class LifecycleManagerService {
 	}
 
 	private handleRelaunch(event: CustomEvent<ActivateType>): void {
+		// Disposable hardware probe: do not let the production ribbon visibility
+		// controller schedule a stale hide after the probe activates the surface.
+		if (event.detail?.intent === Intent.PreviewInputProbe) return;
+
 		if (event.detail?.intent === Intent.ShowHomeBack) {
 			this.emitter.emit('relaunch');
 		} else if (
