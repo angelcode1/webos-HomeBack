@@ -8,18 +8,30 @@ Launching HomeBack with `intent: homeback:probe` bypasses the normal Ribbon UI a
 
 - uses a probe-only intent so it cannot collide with the future production `homeback:preview` contract;
 - activates HomeBack's existing floating webOS surface;
-- does **not** subscribe `KeyboardService` for a cold probe;
-- if triggered while the Ribbon is already visible, first hides the Ribbon and waits for its existing committed-hide transition before starting the probe, so Ribbon-owned keyboard/auto-hide state cannot contaminate the measurement;
+- does **not** subscribe `KeyboardService`;
+- if triggered while the Ribbon is already visible, first hides the Ribbon and waits for its existing committed-hide transition before starting the probe;
 - retains that in-flight Ribbon quiesce so a replacement trigger cannot race ahead of the old 500 ms visibility commit;
 - installs logging-only capture listeners at `window` level that never call `preventDefault`, `stopPropagation`, or `stopImmediatePropagation`;
 - uses a passive capture listener for `wheel`;
 - counts key, wheel, mouse, pointer, focus, blur, click, and visibility events;
-- writes probe events with `console.warn` so WAM logging is less likely to discard them at default verbosity;
-- logs wall-clock/performance-navigation timing and a post-mount paint snapshot for cold-start latency measurement;
+- writes probe events with `console.warn`;
+- logs wall-clock/performance-navigation timing and a post-mount paint snapshot;
 - hides/suspends the HomeBack surface after 30 seconds using the existing lifecycle manager;
 - resets the 30-second probe when another `homeback:probe` relaunch arrives.
 
-The purpose is to distinguish browser event handling from compositor-level focus/input routing.
+An optional experiment-only parameter, `releaseFocus: true`, keeps the same probe and surface activation but asks `webOSSystem.window.setFocus(false)` after the floating surface receives focus. It exists solely to determine whether webOS can leave the floating surface mapped while returning input focus to the underlying card.
+
+## Confirmed C5 baseline
+
+On an LG OLED42C5PSA running firmware 33.00.71 / SDK 10.0.0, the ordinary activated probe (`releaseFocus` absent/false) established these facts:
+
+- YouTube remained a `_WEBOS_WINDOW_TYPE_CARD` while HomeBack was simultaneously mapped as `_WEBOS_WINDOW_TYPE_FLOATING`.
+- LSM explicitly reported the HomeBack floating surface as the **focused surface** for D-pad, OK/Enter, Back and cursor-state key events.
+- HomeBack's logging-only JavaScript received those keys with `defaultPrevented=false`.
+- Magic Remote pointer movement and wheel events reached HomeBack.
+- Short Back reached HomeBack and did not automatically terminate it.
+
+Therefore `webOSSystem.activate()` plus "no JavaScript input consumption" is **not passive input routing** on this TV. The remaining question is whether an explicit window-focus release can keep the floating surface visible while returning input to the underlying card.
 
 ## Build
 
@@ -34,13 +46,29 @@ corepack yarn build
 
 The IPK remains the normal versioned test package under `dist/`.
 
-## Capture logs before triggering
+## Capture logs
 
-Start a broad journal capture on the TV **before** launching the probe so the record survives if Back or another system action terminates/hides HomeBack:
+Production LG firmware may not provide persistent systemd journal files. On the tested C5, `/var/log/messages` and `/var/log/legacy-log` are available through PmLogDaemon.
+
+Enable development logs and the relevant WAM contexts:
 
 ```sh
-LOG="/tmp/homeback-preview-probe-$(date +%s).log"
-journalctl -f -o short-precise | tee "$LOG"
+luna-send -n 1 -f \
+  luna://com.webos.service.config/setConfigs \
+  '{"configs":{"system.collectDevLogs":true}}'
+
+PmLogCtl set WAM debug
+PmLogCtl set wam.jsconsole debug
+PmLogCtl set wam.log debug
+PmLogCtl show | grep -iE 'WAM|wam\.jsconsole|wam\.log'
+```
+
+Start a capture before triggering the probe:
+
+```sh
+LOG="/tmp/homeback-probe-$(date +%s).log"
+echo "$LOG"
+tail -F /var/log/messages /var/log/legacy-log | tee "$LOG"
 ```
 
 The probe prefixes its messages with:
@@ -49,17 +77,50 @@ The probe prefixes its messages with:
 [HomeBackPreviewProbe]
 ```
 
-Do not assume a WAM/pmlog facility filter until it has been confirmed on the target TV/webOS version. After one run, inspect the broad capture and, if the prefix is present, use it for a narrower follow-up view, for example:
+After a run:
 
 ```sh
-grep 'HomeBackPreviewProbe' "$LOG"
+grep -a 'HomeBackPreviewProbe' "$LOG"
 ```
 
-If this webOS build does not forward browser console output into `journalctl`, keep the on-screen counters as the primary browser-event record and note that limitation with the test result.
+If another TV does have journald storage, `journalctl` can still be used, but do not assume it exists.
 
-## Trigger the probe
+## Observe SAM/LSM foreground surfaces
 
-For a cold-start timing run, print a shell timestamp immediately before the launch command. The probe start log contains `epochMs`, `performanceNowMs`, `timeOriginMs`, `navigationStartMs`, and a later `post-mount-frame` entry with browser paint timing when available.
+Run this over SSH before triggering and leave it subscribed:
+
+```sh
+luna-send -i -f \
+  luna://com.webos.service.applicationmanager/getForegroundAppInfo \
+  '{"subscribe":true,"extraInfo":true}'
+```
+
+Record the foreground array before activation, while the probe is visible, and after its timeout. `getForegroundAppInfo` proves surface state, while LSM focus lines plus browser-event counters establish input routing.
+
+With WAM/LSM debug logging enabled, lines of particular interest are:
+
+```text
+WebOSSurfaceItem::keyPressEvent, Focused surface ...
+QPA_KEY_INPUT ... consumed=...
+[HomeBackPreviewProbe] keydown ... defaultPrevented=...
+[HomeBackPreviewProbe] focus
+[HomeBackPreviewProbe] blur
+[HomeBackPreviewProbe] focus-release ...
+```
+
+## Trigger the ordinary activated probe
+
+For a genuine cold timing run, first put the desired underlying source on screen, then close HomeBack over SSH:
+
+```sh
+luna-send -n 1 -f \
+  luna://com.webos.service.applicationManager/closeByAppId \
+  '{"id":"com.homebrew.homeback"}'
+```
+
+**Do not press HOME between this close and the probe launch.** HomeBack's root helper intercepts short HOME and launches `homeback:show`, which makes the subsequent probe a warm relaunch rather than a cold launch.
+
+Then trigger directly from SSH:
 
 ```sh
 echo "probe-trigger $(date '+%Y-%m-%dT%H:%M:%S%z')"
@@ -68,27 +129,57 @@ luna-send -n 1 -f \
   '{"id":"com.homebrew.homeback","params":{"intent":"homeback:probe"}}'
 ```
 
-Equivalent Home Assistant action:
+The probe start log contains `epochMs`, `performanceNowMs`, `timeOriginMs`, `navigationStartMs`, and a later `post-mount-frame` entry. A warm relaunch is useful for resident-path timing but must not be reported as cold-start latency.
 
-```yaml
-action: webostv.command
-target:
-  entity_id: media_player.living_room_tv
-data:
-  command: system.launcher/launch
-  payload:
-    id: com.homebrew.homeback
-    params:
-      intent: homeback:probe
+## Focus-release follow-up — run next
+
+The ordinary C5 test already showed that an activated floating HomeBack surface owns compositor keyboard focus. The next test isolates whether webOS can release that focus without unmapping the surface.
+
+With YouTube already playing, use:
+
+```sh
+luna-send -n 1 -f \
+  luna://com.webos.service.applicationManager/closeByAppId \
+  '{"id":"com.homebrew.homeback"}'
+
+sleep 2
+
+echo "focus-release-probe $(date '+%Y-%m-%dT%H:%M:%S%z')"
+luna-send -n 1 -f \
+  luna://com.webos.service.applicationmanager/launch \
+  '{"id":"com.homebrew.homeback","params":{"intent":"homeback:probe","releaseFocus":true}}'
 ```
 
-For the latency result, distinguish the external launch-command timestamp from the browser-relative values. `performance.now()` / paint-entry times are relative to the webview navigation timeline; `epochMs` lets them be correlated with the SSH/journal record. A warm relaunch is not a substitute for the cold-launch measurement.
+Do not press HOME between the close and launch.
+
+Expected diagnostic logs include:
+
+```text
+[HomeBackPreviewProbe] start ... releaseFocus=true ...
+[HomeBackPreviewProbe] focus
+[HomeBackPreviewProbe] focus-release request ...
+[HomeBackPreviewProbe] blur
+[HomeBackPreviewProbe] focus-release result focused=false ...
+```
+
+The decisive observations are:
+
+1. Does HomeBack remain in `foregroundAppInfo` as `_WEBOS_WINDOW_TYPE_FLOATING` after `focus-release`?
+2. Does LSM still say `surfaceItem_com.homebrew.homeback...` is the focused surface when Left/Right/OK is pressed?
+3. Do HomeBack's key counters still increment?
+4. Does the underlying YouTube UI respond to Left/Right/OK?
+5. Do pointer and wheel events remain with HomeBack or return to YouTube?
+
+Interpretation:
+
+- **Surface remains + LSM focus/keys return underneath:** a truly passive preview remains viable.
+- **Surface remains + LSM still targets HomeBack:** passive preview is not viable with this API; production preview must be interactive/focus-owning or use a different platform surface mechanism.
+- **Focus release unmaps/minimizes the surface:** `setFocus(false)` cannot provide the desired passive overlay contract.
+- **`setFocus(false)` throws or has no observable effect:** treat it as unavailable/ineffective on this firmware and use the activated-probe result.
 
 ## Abort / lockout recovery
 
-If the floating surface captures application input, a run can make normal navigation appear dead for up to 30 seconds. Do not rely on the remote as the only escape path.
-
-From SSH, force HomeBack back to its normal Ribbon route:
+If the floating surface captures application input, do not rely on the remote as the only escape path. From SSH:
 
 ```sh
 luna-send -n 1 -f \
@@ -96,25 +187,9 @@ luna-send -n 1 -f \
   '{"id":"com.homebrew.homeback","params":{"intent":"homeback:show"}}'
 ```
 
-This unmounts the probe and clears its timers. It intentionally leaves the normal HomeBack Ribbon open; dismiss it normally afterwards.
-
-## Observe SAM/LSM foreground surfaces
-
-Run this over SSH before triggering the probe and leave it subscribed:
-
-```sh
-luna-send -i -f \
-  luna://com.webos.service.applicationmanager/getForegroundAppInfo \
-  '{"subscribe":true,"extraInfo":true}'
-```
-
-Record the foreground array before activation, while the probe is visible, and after its timeout.
-
-`getForegroundAppInfo` is evidence of foreground surface state; it is not by itself proof of input focus. The capture-phase/non-consuming event counters and the underlying application's response are the input-routing evidence.
+This unmounts the probe and clears its timers. It intentionally leaves the normal HomeBack Ribbon open.
 
 ## Record the TV version before Ribbon-visible lifecycle checks
-
-Before lifecycle checks that start the probe from an already-visible Ribbon, record the TV identity/version:
 
 ```sh
 luna-send -n 1 -f \
@@ -122,46 +197,23 @@ luna-send -n 1 -f \
   '{"keys":["sdkVersion","firmwareVersion","modelName"]}'
 ```
 
-This matters because the current production `commitHidden()` uses `applicationManager/suspense` on webOS below 7.3 and also while `sdkVersion` is unresolved/unparseable. The Ribbon-visible experiment path deliberately waits for that existing committed-hide operation and then activates the probe. On those systems this can therefore become `suspense` followed very quickly by `activate`, a sequence normal HomeBack does not otherwise perform.
-
-The **cold probe is unaffected** by this ambiguity. Run the source/input matrix first. Run Ribbon-visible lifecycle check 4 last, with the SSH abort command ready. If the recorded SDK is below 7.3, or the probe start log shows `sdkVersion=null`, treat any anomaly in that Ribbon-visible check as suspect until separately reproduced; do not promote it to a compositor/input conclusion.
+The current production `commitHidden()` uses `applicationManager/suspense` on webOS below 7.3 and while `sdkVersion` is unresolved/unparseable. The tested C5 reports SDK 10.0.0, so that old-platform caveat does not apply there. On older/unknown firmware, run the Ribbon-visible lifecycle check last and treat anomalies in its `suspense -> activate` sequence separately from the cold input result.
 
 ## Control pass — required before every probe run
 
-Before launching the probe over a source, exercise the exact keys/actions that will be tested and record which ones the underlying source normally handles. Do not score an action as "blocked by HomeBack" unless the same action demonstrably worked immediately before the probe.
-
-Examples:
-
-- verify D-pad and OK move/select in YouTube before testing them under the probe;
-- verify Play/Pause actually affects the current app/source before using it as evidence;
-- verify Channel +/- changes channels in Live TV;
-- record actions that the current source simply ignores as **N/A**, not pass/fail.
+Before launching the probe over a source, exercise the exact actions that will be tested and record which ones the underlying source normally handles. Do not score an action as blocked unless it demonstrably worked immediately before the probe. Record actions the source itself ignores as **N/A**.
 
 ## Hardware matrix
 
-Run the probe over at least YouTube, Live TV, and HDMI; add Netflix/Plex if convenient.
+Run over at least YouTube, Live TV and HDMI; add Netflix/Plex if convenient. For each source test D-pad, OK, short Back, long Back, Play/Pause where meaningful, Magic Remote pointer movement, wheel/scroll, click, Channel +/- on Live TV, and short HOME. Volume/Mute are controls only because they may route below ordinary application input handling.
 
-For each source, record the control-pass result, whether the underlying application responds during the probe, and whether HomeBack's counters increment for:
+For each input distinguish:
 
-- D-pad Left/Right/Up/Down
-- OK/Enter
-- short Back
-- long Back
-- Play/Pause
-- Magic Remote pointer movement
-- wheel/scroll
-- click/pointer activation
-- Channel +/- on Live TV
-- Volume +/- and Mute as controls only; these may be routed below normal app input handling
-- short HOME while the probe is active
-
-Possible results must distinguish:
-
-1. HomeBack logs the key and the underlying app also responds.
-2. HomeBack logs the key but the underlying app does not respond.
-3. HomeBack does not log the key and the underlying app responds.
-4. Neither HomeBack nor the underlying app receives/responds.
-5. Back or another system key causes HomeBack/platform exit or other system-level behaviour.
+1. HomeBack receives it and the underlying app also responds.
+2. HomeBack receives it and the underlying app does not respond.
+3. HomeBack does not receive it and the underlying app responds.
+4. Neither receives/responds.
+5. The platform performs system-level Back/HOME behaviour.
 
 Test short and long Back separately. `disableBackHistoryAPI: true` means Back behaviour must be measured rather than inferred from browser history semantics.
 
@@ -172,18 +224,14 @@ Also verify:
 1. Existing video/audio continues while the probe appears.
 2. After the 30-second timeout, underlying navigation returns immediately and HomeBack is no longer foreground.
 3. Triggering a second `homeback:probe` while one is active replaces/resets the probe without an obvious compositor/focus flash.
-4. Triggering the probe while the Ribbon is already visible first quiesces the Ribbon, then produces a stable 30-second probe rather than disappearing after the old 500 ms hide commit.
-5. Pressing short HOME during the probe records the resulting `webOSRelaunch` behaviour and returns to the normal Ribbon route without a stale probe timer firing later.
-6. After the probe times out, HomeBack can still be reopened normally.
-
-For lifecycle checks 4–6, keep both the SAM/LSM subscription and journal capture running; screen observation alone is insufficient. Apply the SDK-version caveat above to check 4.
+4. Triggering from an already-visible Ribbon first quiesces the Ribbon, then produces a stable probe.
+5. Short HOME during the probe records the resulting `webOSRelaunch` and returns to the Ribbon without a stale timeout firing later.
+6. After timeout, HomeBack can still be reopened normally.
 
 ## Known branch-only bookkeeping drift
 
-The probe timeout calls `lifecycleManagerService.commitHidden()` directly. That correctly asks webOS to hide/suspend the experimental surface, but it bypasses RibbonService's private `hiddenCommitted` bookkeeping, so RibbonService can believe the surface is not committed hidden even though the compositor has been told to hide it.
-
-This is intentionally **not fixed in the disposable probe**. Nothing in the cold input measurement relies on RibbonService's committed state after timeout, and changing the ownership model here would prematurely implement the production refactor. Record it as concrete evidence for Phase 1: compositor commits and their bookkeeping must have one owner (`SurfaceService`) rather than being split between feature code and lifecycle code.
+The probe timeout calls `lifecycleManagerService.commitHidden()` directly. That correctly asks webOS to hide the experimental surface but bypasses RibbonService's private `hiddenCommitted` bookkeeping. This is intentionally not fixed here: it is concrete evidence that production compositor commits and committed-state bookkeeping need one owner (`SurfaceService`).
 
 ## Interpretation
 
-Do **not** add a fourth `KeyboardOwner` based on this branch. The production input contract remains intentionally undecided until the TV results show whether a preview-only floating surface can be passive.
+Do **not** add a fourth `KeyboardOwner` based on this branch. The ordinary activated probe has proven that activation itself gives HomeBack compositor focus on the tested C5. Complete the `releaseFocus: true` test before locking the production input contract.
