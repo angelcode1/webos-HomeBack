@@ -1,0 +1,66 @@
+.probe {
+	position: fixed;
+	top: 56px;
+	right: 56px;
+	z-index: 10000;
+	width: min(620px, calc(100vw - 112px));
+	box-sizing: border-box;
+	padding: 24px;
+	border: 2px solid rgba(255, 255, 255, 0.65);
+	border-radius: 16px;
+	background: rgba(12, 12, 16, 0.92);
+	box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+	color: #fff;
+	font-family: sans-serif;
+	pointer-events: none;
+}
+
+.heading {
+	font-size: 28px;
+	font-weight: 700;
+}
+
+.warning {
+	margin-top: 4px;
+	font-size: 18px;
+	color: rgba(255, 255, 255, 0.8);
+}
+
+.status {
+	display: flex;
+	gap: 18px;
+	margin-top: 18px;
+	font-size: 17px;
+}
+
+.grid {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 8px;
+	margin-top: 18px;
+}
+
+.counter {
+	display: flex;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 7px 10px;
+	border-radius: 8px;
+	background: rgba(255, 255, 255, 0.08);
+	font-size: 15px;
+}
+
+.events {
+	margin-top: 18px;
+	font-family: monospace;
+	font-size: 13px;
+	line-height: 1.4;
+	word-break: break-word;
+}
+
+.eventsTitle {
+	margin-bottom: 6px;
+	font-family: sans-serif;
+	font-size: 16px;
+	font-weight: 700;
+}

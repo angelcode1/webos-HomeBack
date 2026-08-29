@@ -1,5 +1,6 @@
 export const Intent = {
 	ShowHomeBack: 'homeback:show',
+	PreviewInputProbe: 'homeback:probe',
 } as const;
 
 export type Intent = typeof Intent[keyof typeof Intent];
@@ -7,6 +8,8 @@ export type Intent = typeof Intent[keyof typeof Intent];
 export interface ActivateType {
 	activateType?: 'home' | string;
 	intent?: Intent | string;
+	/** Disposable preview-input experiment only. */
+	releaseFocus?: boolean;
 }
 
 export const APPLICATION_MANAGER_URI = 'luna://com.webos.service.applicationManager';

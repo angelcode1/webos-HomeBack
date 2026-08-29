@@ -30,11 +30,20 @@ test('setup-complete marker persists successful first setup', () => {
 	assert.equal(hasCompletedSetup(storage), true);
 });
 
-test('show launch intent is parsed without making malformed params fatal', () => {
+test('launch intents are parsed without making malformed params fatal', () => {
 	assert.equal(
 		parseActivateType('{"intent":"homeback:show"}').intent,
 		Intent.ShowHomeBack,
 	);
+	assert.equal(
+		parseActivateType('{"intent":"homeback:probe"}').intent,
+		Intent.PreviewInputProbe,
+	);
+	const passiveProbe = parseActivateType(
+		'{"intent":"homeback:probe","releaseFocus":true}',
+	);
+	assert.equal(passiveProbe.intent, Intent.PreviewInputProbe);
+	assert.equal(passiveProbe.releaseFocus, true);
 	assert.deepEqual(parseActivateType('not-json'), {});
 	assert.deepEqual(parseActivateType('[]'), {});
 });
