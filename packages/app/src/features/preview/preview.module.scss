@@ -1,0 +1,38 @@
+.preview {
+	position: fixed;
+	top: 42px;
+	right: 42px;
+	z-index: 1000;
+	width: 560px;
+	padding: 14px;
+	box-sizing: border-box;
+	border-radius: 14px;
+	background: rgba(12, 12, 12, 0.92);
+	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+	font-family: sans-serif;
+	color: white;
+}
+
+.title {
+	padding: 2px 4px 10px;
+	font-size: 26px;
+	font-weight: 600;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.image {
+	display: block;
+	width: 100%;
+	max-height: 360px;
+	object-fit: contain;
+	border-radius: 9px;
+	background: black;
+}
+
+.hint {
+	padding: 10px 4px 1px;
+	font-size: 18px;
+	opacity: 0.78;
+}
