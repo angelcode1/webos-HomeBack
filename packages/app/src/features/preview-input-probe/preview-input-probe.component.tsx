@@ -128,12 +128,11 @@ export const PreviewInputProbe = ({
 		window.addEventListener('blur', handleBlur, true);
 
 		lifecycleManagerService.commitVisible();
-		console.warn('[HomeBackPreviewProbe] start', {
-			activation,
-			launchReason: webOSSystem.launchReason,
-			visibilityState: document.visibilityState,
-			focused: document.hasFocus(),
-		});
+		console.warn(
+			`[HomeBackPreviewProbe] start activation=${JSON.stringify(activation)} ` +
+				`launchReason=${JSON.stringify(webOSSystem.launchReason)} ` +
+				`visibilityState=${document.visibilityState} focused=${document.hasFocus()}`,
+		);
 
 		const snapshot = (): void => {
 			setCounts({ ...countsRef.current });
