@@ -1,6 +1,7 @@
 import mitt from 'mitt';
 
-import { parseActivateType, type ActivateType } from '../../../api/common';
+import { parseActivateType, type ActivateType } from 'shared/api/common';
+
 import type { ActivationAction, ActivationEvents } from '../api/activation.interface';
 import { activationActionFrom } from './activation.lib';
 
@@ -22,6 +23,9 @@ export class ActivationService {
 	}
 
 	private readonly handleRelaunch = (event: CustomEvent<ActivateType>): void => {
-		this.emitter.emit('action', activationActionFrom(event.detail ?? {}, webOSSystem.launchReason, false));
+		this.emitter.emit(
+			'action',
+			activationActionFrom(event.detail ?? {}, webOSSystem.launchReason, false),
+		);
 	};
 }
