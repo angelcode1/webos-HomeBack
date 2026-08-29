@@ -1,9 +1,7 @@
-import { makeAutoObservable, observable, reaction, when } from 'mobx';
+import { makeAutoObservable, observable, reaction } from 'mobx';
 
-import { Intent, parseActivateType } from 'shared/api/common';
 import type { LaunchPointInstance } from 'shared/services/launcher';
 import { LauncherService } from 'shared/services/launcher';
-import { LifecycleManagerService } from 'shared/services/lifecycle-manager';
 import { luna } from 'shared/services/luna';
 
 import { AppDrawerService } from '../app-drawer';
@@ -11,14 +9,7 @@ import { KeyboardService } from '../keyboard';
 import { ScrollService } from '../scroll';
 import { RIBBON_AUTO_HIDE_MS } from './ribbon.lib';
 
-const VISIBILITY_TRANSITION_MS = 500;
-const HIDE_WAIT_TIMEOUT_MS = 2_000;
 const REMOTE_HEALTH_POLL_MS = 5_000;
-const INITIAL_ACTIVATION = parseActivateType(webOSSystem.launchParams);
-const START_HIDDEN =
-	webOSSystem.launchReason === 'preload' &&
-	INITIAL_ACTIVATION.intent !== Intent.ShowHomeBack &&
-	INITIAL_ACTIVATION.activateType !== 'home';
 
 type RemoteStatusResponse = {
 	returnValue: true;
@@ -37,33 +28,22 @@ export class RibbonService {
 
 	private ref: HTMLElement | null = null;
 	private index: number | null = null;
-	private visibilityTimer: ReturnType<typeof setTimeout> | null = null;
 	private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
 	private remoteHealthTimer: ReturnType<typeof setInterval> | null = null;
-	private visibilityRevision = 0;
-	private hiddenCommitted = START_HIDDEN;
-	private readonly hiddenWaiters = new Set<{
-		resolve: () => void;
-		reject: (error: Error) => void;
-		timer: ReturnType<typeof setTimeout>;
-	}>();
 
 	public constructor(
 		public readonly launcherService: LauncherService,
 		public readonly scrollService: ScrollService,
 		public readonly appDrawerService: AppDrawerService,
-		private readonly lifecycleManager: LifecycleManagerService,
 		public readonly keyboardService: KeyboardService,
 	) {
 		makeAutoObservable<
 			RibbonService,
-			'ref' | 'lifecycleManager' | 'hiddenWaiters' | 'autoHideTimer' | 'remoteHealthTimer' | 'keyboardService'
+			'ref' | 'autoHideTimer' | 'remoteHealthTimer' | 'keyboardService'
 		>(
 			this,
 			{
 				ref: observable.ref,
-				lifecycleManager: false,
-				hiddenWaiters: false,
 				autoHideTimer: false,
 				remoteHealthTimer: false,
 				keyboardService: false,
@@ -80,48 +60,21 @@ export class RibbonService {
 			back: this.handleBack,
 		});
 
-		lifecycleManager.bindVisibilityController({
-			isVisible: () => this.visible,
-			requestHide: this.hide,
-			waitUntilHidden: this.waitUntilHidden,
-		});
-
-		when(
-			() => this.mounted && this.launcherService.fulfilled,
-			() => {
-				if (START_HIDDEN) {
-					this.visible = false;
-					this.lifecycleManager.commitHidden();
-				} else {
-					this.visible = true;
-				}
-			},
-		);
-
 		reaction(
 			() => this.visible,
 			visible => {
-				this.scheduleVisibilityCommit(visible);
 				this.moving = false;
 				this.deleteFocused = false;
 				this.appDrawerService.visible = false;
 				if (!visible) this.numericKeypadVisible = false;
-
-				if (visible) {
-					keyboardService.subscribe(document, true);
-					void this.refreshRemoteHealth();
-				} else {
-					keyboardService.unsubscribe();
-				}
+				if (visible) void this.refreshRemoteHealth();
 			},
 		);
 
-		// One UI-state reaction owns scroll routing, key ownership and auto-hide.
 		reaction(
 			() => [this.visible, this.moving, this.appDrawerService.visible, this.numericKeypadVisible] as const,
 			([visible, _moving, drawerVisible, keypadVisible]) => {
 				this.scrollService.enabled = visible && !drawerVisible && !keypadVisible;
-				keyboardService.setOwner(keypadVisible ? 'keypad' : drawerVisible ? 'drawer' : 'ribbon');
 				this.scheduleAutoHide();
 			},
 			{ fireImmediately: true },
@@ -134,8 +87,6 @@ export class RibbonService {
 			},
 		);
 
-		lifecycleManager.emitter.on('relaunch', this.toggle);
-		lifecycleManager.emitter.on('requestHide', this.hide);
 		this.launcherService.emitter.on('openDrawer', this.openDrawer);
 		this.launcherService.emitter.on('openNumericKeyboard', this.openNumericKeypad);
 
@@ -145,8 +96,9 @@ export class RibbonService {
 	}
 
 	public dispose(): void {
-		if (this.remoteHealthTimer === null) return;
-		clearInterval(this.remoteHealthTimer);
+		if (this.autoHideTimer !== null) clearTimeout(this.autoHideTimer);
+		this.autoHideTimer = null;
+		if (this.remoteHealthTimer !== null) clearInterval(this.remoteHealthTimer);
 		this.remoteHealthTimer = null;
 	}
 
@@ -178,6 +130,26 @@ export class RibbonService {
 			return 'Some launcher sources are unavailable. Reopen HomeBack or check system services.';
 		}
 		return null;
+	}
+
+	public show(): void {
+		this.visible = true;
+	}
+
+	public hide(): void {
+		this.visible = false;
+	}
+
+	public toggle(): void {
+		this.visible = !this.visible;
+	}
+
+	public dismissFeatures(): void {
+		this.visible = false;
+		this.moving = false;
+		this.deleteFocused = false;
+		this.appDrawerService.visible = false;
+		this.numericKeypadVisible = false;
 	}
 
 	public noteInteraction(): void {
@@ -264,36 +236,6 @@ export class RibbonService {
 		this.index = max >= 0 ? Math.min(oldIndex, max) : null;
 	}
 
-	public hide(): void {
-		this.visible = false;
-	}
-
-	public async waitUntilHidden(): Promise<void> {
-		if (!this.visible && this.hiddenCommitted) return;
-		await when(() => !this.visible);
-		if (this.hiddenCommitted) return;
-
-		await new Promise<void>((resolve, reject) => {
-			const waiter = {
-				resolve,
-				reject,
-				timer: setTimeout(() => {
-					this.hiddenWaiters.delete(waiter);
-					reject(new Error('Timed out waiting for HomeBack to finish hiding.'));
-				}, HIDE_WAIT_TIMEOUT_MS),
-			};
-			this.hiddenWaiters.add(waiter);
-		});
-	}
-
-	private get mounted(): boolean {
-		return Boolean(this.ref);
-	}
-
-	private toggle(): void {
-		this.visible = !this.visible;
-	}
-
 	private openDrawer(): void {
 		this.finishEditing();
 		this.numericKeypadVisible = false;
@@ -322,30 +264,6 @@ export class RibbonService {
 				!this.numericKeypadVisible
 			) this.visible = false;
 		}, RIBBON_AUTO_HIDE_MS);
-	}
-
-	private scheduleVisibilityCommit(visible: boolean): void {
-		if (this.visibilityTimer) clearTimeout(this.visibilityTimer);
-		const revision = ++this.visibilityRevision;
-		if (visible) this.hiddenCommitted = false;
-
-		this.visibilityTimer = setTimeout(() => {
-			this.visibilityTimer = null;
-			if (revision !== this.visibilityRevision || this.visible !== visible) return;
-
-			if (visible) {
-				this.lifecycleManager.commitVisible();
-				return;
-			}
-
-			this.lifecycleManager.commitHidden();
-			this.hiddenCommitted = true;
-			for (const waiter of this.hiddenWaiters) {
-				clearTimeout(waiter.timer);
-				waiter.resolve();
-			}
-			this.hiddenWaiters.clear();
-		}, VISIBILITY_TRANSITION_MS);
 	}
 
 	private focusToFirstVisibleNode(): void {
