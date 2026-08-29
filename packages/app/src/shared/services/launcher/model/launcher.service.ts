@@ -3,21 +3,23 @@ import mitt from 'mitt';
 
 import { APPLICATION_MANAGER_URI } from 'shared/api/common';
 
-import { LifecycleManagerService } from '../../lifecycle-manager';
 import { luna } from '../../luna';
 import { SettingsService } from '../../settings';
+import { SurfaceService } from '../../surface';
 import type {
 	InternalLaunchParams,
 	LaunchPointActions,
 	LaunchPointInput,
 	LaunchPointInstance,
 } from '../api/launch-point.interface';
-import { LaunchPoint } from './launch-point.model';
 import type { LaunchPointsProvider } from '../providers';
+import { LaunchPoint } from './launch-point.model';
 
-type LauncherEvents = {
+export type LauncherEvents = {
 	openDrawer: void;
 	openNumericKeyboard: void;
+	beforeExternalLaunch: void;
+	beforeSurfaceYield: void;
 };
 
 const isInternalParams = (
@@ -32,17 +34,17 @@ export class LauncherService implements LaunchPointActions {
 
 	public constructor(
 		private readonly settingsService: SettingsService,
-		private readonly lifecycleManager: LifecycleManagerService,
+		private readonly surfaceService: SurfaceService,
 		private readonly providers: LaunchPointsProvider[],
 	) {
 		makeAutoObservable<
 			LauncherService,
-			'settingsService' | 'lifecycleManager' | 'providers' | 'launchPointsMap'
+			'settingsService' | 'surfaceService' | 'providers' | 'launchPointsMap'
 		>(
 			this,
 			{
 				settingsService: false,
-				lifecycleManager: false,
+				surfaceService: false,
 				providers: false,
 				launchPointsMap: false,
 			},
@@ -72,8 +74,6 @@ export class LauncherService implements LaunchPointActions {
 	}
 
 	public get fulfilled(): boolean {
-		// Settled means the launcher has enough information to render. A provider
-		// error is surfaced separately rather than masquerading as healthy.
 		return this.providers.every(provider => provider.state !== 'loading');
 	}
 
@@ -115,12 +115,13 @@ export class LauncherService implements LaunchPointActions {
 					return { returnValue: true };
 
 				case 'showInputPicker':
-					await this.lifecycleManager.requestHideAndWait();
+					this.emitter.emit('beforeSurfaceYield');
+					await this.surfaceService.waitUntilHidden();
 					return luna('luna://com.webos.surfacemanager/showInputPicker', {});
 			}
 		}
 
-		if (!builtin) this.lifecycleManager.broadcastHide();
+		if (!builtin) this.emitter.emit('beforeExternalLaunch');
 
 		return luna(`${APPLICATION_MANAGER_URI}/launch`, {
 			id: appId,
@@ -139,7 +140,6 @@ export class LauncherService implements LaunchPointActions {
 
 	public move(launchPoint: LaunchPointInstance, shift: number): void {
 		if (shift !== -1 && shift !== 1) return;
-
 		const ids = this.visible
 			.filter(item => !item.builtin)
 			.map(item => item.launchPointId);
@@ -181,7 +181,6 @@ export class LauncherService implements LaunchPointActions {
 		for (const id of [...this.launchPointsMap.keys()]) {
 			if (!liveIds.has(id)) this.launchPointsMap.delete(id);
 		}
-
 		this.launchPointIds = nextIds;
 	}
 }
