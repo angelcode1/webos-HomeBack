@@ -12,7 +12,7 @@
 	"disableBackHistoryAPI": true,
 	"supportQuickStart": true,
 	"visible": true,
-	"defaultWindowType": "floating",
+	"defaultWindowType": "overlay",
 	"handlesRelaunch": true,
 	"services": [
 		"@SERVICE_ID@"
