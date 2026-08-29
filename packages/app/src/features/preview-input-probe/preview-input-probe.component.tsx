@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type { ActivateType } from 'shared/api/common';
-import { lifecycleManagerService } from 'shared/services/services';
+import { lifecycleManagerService, systemInfoService } from 'shared/services/services';
 
 import s from './preview-input-probe.module.scss';
 
@@ -54,7 +54,9 @@ export const PreviewInputProbe = ({
 	useEffect(() => {
 		let lastMouseLogMs = 0;
 		let lastPointerLogMs = 0;
+		let secondPaintFrame: number | null = null;
 		const startedAtMs = Date.now();
+		const performanceStartedAtMs = performance.now();
 		const expiresAtMs = startedAtMs + PROBE_DURATION_MS;
 
 		const record = (kind: ProbeCounter, detail = '', log = true): void => {
@@ -129,10 +131,28 @@ export const PreviewInputProbe = ({
 
 		lifecycleManagerService.commitVisible();
 		console.warn(
-			`[HomeBackPreviewProbe] start activation=${JSON.stringify(activation)} ` +
-				`launchReason=${JSON.stringify(webOSSystem.launchReason)} ` +
-				`visibilityState=${document.visibilityState} focused=${document.hasFocus()}`,
+			`[HomeBackPreviewProbe] start epochMs=${startedAtMs} ` +
+				`performanceNowMs=${performanceStartedAtMs.toFixed(1)} ` +
+				`timeOriginMs=${performance.timeOrigin} navigationStartMs=${performance.timing.navigationStart} ` +
+				`activation=${JSON.stringify(activation)} launchReason=${JSON.stringify(webOSSystem.launchReason)} ` +
+				`visibilityState=${document.visibilityState} focused=${document.hasFocus()} ` +
+				`sdkVersion=${JSON.stringify(systemInfoService.sdkVersion)} ` +
+				`firmwareVersion=${JSON.stringify(systemInfoService.firmwareVersion)} ` +
+				`modelName=${JSON.stringify(systemInfoService.modelName)}`,
 		);
+
+		const firstPaintFrame = window.requestAnimationFrame(() => {
+			secondPaintFrame = window.requestAnimationFrame(() => {
+				const paintEntries = performance.getEntriesByType('paint').map(entry => ({
+					name: entry.name,
+					startTimeMs: Math.round(entry.startTime * 10) / 10,
+				}));
+				console.warn(
+					`[HomeBackPreviewProbe] post-mount-frame epochMs=${Date.now()} ` +
+						`performanceNowMs=${performance.now().toFixed(1)} paintEntries=${JSON.stringify(paintEntries)}`,
+				);
+			});
+		});
 
 		const snapshot = (): void => {
 			setCounts({ ...countsRef.current });
@@ -153,6 +173,8 @@ export const PreviewInputProbe = ({
 		return () => {
 			clearInterval(snapshotTimer);
 			clearTimeout(expiryTimer);
+			window.cancelAnimationFrame(firstPaintFrame);
+			if (secondPaintFrame !== null) window.cancelAnimationFrame(secondPaintFrame);
 			window.removeEventListener('keydown', handleKeyDown, true);
 			window.removeEventListener('keyup', handleKeyUp, true);
 			window.removeEventListener('wheel', handleWheel, true);
