@@ -23,6 +23,22 @@ export const App = (): JSX.Element | null => {
 
 	useEffect(() => {
 		let relaunchRevision = 0;
+		let ribbonQuiesce: Promise<void> | null = null;
+
+		const beginRibbonQuiesce = (): Promise<void> => {
+			if (ribbonQuiesce) return ribbonQuiesce;
+
+			ribbonService.hide();
+			const pending = ribbonService.waitUntilHidden()
+				.catch(error => {
+					console.warn('[HomeBackPreviewProbe] unable to quiesce Ribbon before probe', error);
+				})
+				.finally(() => {
+					if (ribbonQuiesce === pending) ribbonQuiesce = null;
+				});
+			ribbonQuiesce = pending;
+			return pending;
+		};
 
 		const handleRelaunch = (event: CustomEvent<ActivateType>): void => {
 			const revision = ++relaunchRevision;
@@ -40,20 +56,18 @@ export const App = (): JSX.Element | null => {
 				};
 
 				// A probe launched from an already-visible Ribbon must first quiesce
-				// the old Ribbon-owned keyboard and auto-hide machinery. Waiting here
-				// is experiment-only and does not affect the cold probe measurement.
-				if (!ribbonService.visible) {
-					showProbe();
+				// the old Ribbon-owned keyboard and auto-hide machinery. Keep that
+				// quiesce promise while its 500 ms visibility commit is outstanding so
+				// replacement triggers cannot race ahead and be hidden by the stale
+				// Ribbon commit. This remains experiment-only and does not affect the
+				// cold probe measurement.
+				if (ribbonQuiesce || ribbonService.visible) {
+					const pending = ribbonQuiesce ?? beginRibbonQuiesce();
+					void pending.finally(showProbe);
 					return;
 				}
 
-				ribbonService.hide();
-				void ribbonService.waitUntilHidden()
-					.catch(error => {
-						if (revision !== relaunchRevision) return;
-						console.warn('[HomeBackPreviewProbe] unable to quiesce Ribbon before probe', error);
-					})
-					.finally(showProbe);
+				showProbe();
 				return;
 			}
 
