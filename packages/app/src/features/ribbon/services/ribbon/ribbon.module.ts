@@ -1,6 +1,5 @@
 import {
 	launcherService,
-	lifecycleManagerService,
 	settingsService,
 } from 'shared/services/services';
 
@@ -17,7 +16,6 @@ export const ribbonService = new RibbonService(
 	launcherService,
 	scrollService,
 	appDrawerService,
-	lifecycleManagerService,
 	keyboardService,
 );
 
