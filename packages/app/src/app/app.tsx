@@ -26,13 +26,18 @@ export const App = (): JSX.Element | null => {
 		let ribbonQuiesce: Promise<void> | null = null;
 
 		const beginRibbonQuiesce = (): Promise<void> => {
-			if (ribbonQuiesce) return ribbonQuiesce;
+			// Reuse only an in-flight hide that is still logically hiding the Ribbon.
+			// If another relaunch reopened it, the old waiter is stale and a fresh
+			// hide must own the transition before a probe may start.
+			if (ribbonQuiesce && !ribbonService.visible) return ribbonQuiesce;
+			ribbonQuiesce = null;
 
 			ribbonService.hide();
 			const pending = ribbonService.waitUntilHidden()
 				.catch(error => {
 					console.warn('[HomeBackPreviewProbe] unable to quiesce Ribbon before probe', error);
-				})
+					throw error;
+			})
 				.finally(() => {
 					if (ribbonQuiesce === pending) ribbonQuiesce = null;
 				});
@@ -59,11 +64,13 @@ export const App = (): JSX.Element | null => {
 				// the old Ribbon-owned keyboard and auto-hide machinery. Keep that
 				// quiesce promise while its 500 ms visibility commit is outstanding so
 				// replacement triggers cannot race ahead and be hidden by the stale
-				// Ribbon commit. This remains experiment-only and does not affect the
-				// cold probe measurement.
+				// Ribbon commit. If the committed hide fails, fail closed and do not
+				// run a contaminated hardware measurement.
 				if (ribbonQuiesce || ribbonService.visible) {
-					const pending = ribbonQuiesce ?? beginRibbonQuiesce();
-					void pending.finally(showProbe);
+					const pending = ribbonQuiesce && !ribbonService.visible
+						? ribbonQuiesce
+						: beginRibbonQuiesce();
+					void pending.then(showProbe, () => undefined);
 					return;
 				}
 
@@ -71,12 +78,17 @@ export const App = (): JSX.Element | null => {
 				return;
 			}
 
+			// Any non-probe relaunch invalidates an in-flight probe transition. Its
+			// waiter may still settle later, but it must never be reused by a future
+			// probe after HOME/show has reopened the Ribbon.
+			ribbonQuiesce = null;
 			setMode({ kind: 'ribbon' });
 		};
 
 		document.addEventListener('webOSRelaunch', handleRelaunch);
 		return () => {
 			relaunchRevision += 1;
+			ribbonQuiesce = null;
 			document.removeEventListener('webOSRelaunch', handleRelaunch);
 		};
 	}, []);
