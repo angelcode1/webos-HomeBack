@@ -1,5 +1,6 @@
 export const Intent = {
 	ShowHomeBack: 'homeback:show',
+	PreviewInputProbe: 'homeback:preview',
 } as const;
 
 export type Intent = typeof Intent[keyof typeof Intent];
