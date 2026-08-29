@@ -1,11 +1,9 @@
-import {
-	Intent,
-	type ActivateType,
-	type PreviewLaunchPayload,
-} from '../../../api/common';
+import type { ActivateType, PreviewLaunchPayload } from '../../../api/common';
 
 import type { ActivationAction, PreviewRequest } from '../api/activation.interface';
 
+const SHOW_HOME_BACK_INTENT = 'homeback:show';
+const PREVIEW_INTENT = 'homeback:preview';
 const MAX_PREVIEW_TITLE_LENGTH = 120;
 
 const parsePreviewUrl = (value: unknown): string | null => {
@@ -47,12 +45,12 @@ export const activationActionFrom = (
 	launchReason: string | undefined,
 	cold: boolean,
 ): ActivationAction => {
-	if (activation.intent === Intent.Preview) {
+	if (activation.intent === PREVIEW_INTENT) {
 		const preview = parsePreviewRequest(activation.preview);
 		return preview ? { type: 'showPreview', preview } : { type: 'none' };
 	}
 
-	if (activation.intent === Intent.ShowHomeBack || activation.activateType === 'home') {
+	if (activation.intent === SHOW_HOME_BACK_INTENT || activation.activateType === 'home') {
 		return cold ? { type: 'showLauncher' } : { type: 'toggleLauncher' };
 	}
 
