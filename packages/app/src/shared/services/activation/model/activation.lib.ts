@@ -1,5 +1,4 @@
-import type { ActivateType, PreviewLaunchPayload } from '../../../api/common';
-
+import type { ActivateType, PreviewLaunchPayload } from 'shared/api/common';
 import type { ActivationAction, PreviewRequest } from '../api/activation.interface';
 
 const SHOW_HOME_BACK_INTENT = 'homeback:show';
