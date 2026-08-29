@@ -39,6 +39,11 @@ test('launch intents are parsed without making malformed params fatal', () => {
 		parseActivateType('{"intent":"homeback:probe"}').intent,
 		Intent.PreviewInputProbe,
 	);
+	const passiveProbe = parseActivateType(
+		'{"intent":"homeback:probe","releaseFocus":true}',
+	);
+	assert.equal(passiveProbe.intent, Intent.PreviewInputProbe);
+	assert.equal(passiveProbe.releaseFocus, true);
 	assert.deepEqual(parseActivateType('not-json'), {});
 	assert.deepEqual(parseActivateType('[]'), {});
 });
