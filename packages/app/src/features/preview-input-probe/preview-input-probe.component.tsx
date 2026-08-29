@@ -63,7 +63,7 @@ export const PreviewInputProbe = ({
 			const elapsed = Date.now() - startedAtMs;
 			const line = `${elapsed}ms ${kind}${detail ? ` ${detail}` : ''}`;
 			recentEventsRef.current = [line, ...recentEventsRef.current].slice(0, RECENT_EVENT_LIMIT);
-			console.info(`[HomeBackPreviewProbe] ${line}`);
+			console.warn(`[HomeBackPreviewProbe] ${line}`);
 		};
 
 		const handleKeyDown = (event: KeyboardEvent): void => {
@@ -114,18 +114,21 @@ export const PreviewInputProbe = ({
 			record('visibilitychange', `state=${document.visibilityState}`);
 		};
 
-		document.addEventListener('keydown', handleKeyDown, false);
-		document.addEventListener('keyup', handleKeyUp, false);
-		document.addEventListener('wheel', handleWheel, { passive: true });
-		document.addEventListener('mousemove', handleMouseMove, false);
-		document.addEventListener('pointermove', handlePointerMove, false);
-		document.addEventListener('click', handleClick, false);
-		document.addEventListener('visibilitychange', handleVisibilityChange, false);
-		window.addEventListener('focus', handleFocus, false);
-		window.addEventListener('blur', handleBlur, false);
+		// Capture at window level so the probe observes input before any existing
+		// document-level capture listener can consume it. The handlers themselves
+		// remain strictly non-consuming.
+		window.addEventListener('keydown', handleKeyDown, true);
+		window.addEventListener('keyup', handleKeyUp, true);
+		window.addEventListener('wheel', handleWheel, { passive: true, capture: true });
+		window.addEventListener('mousemove', handleMouseMove, true);
+		window.addEventListener('pointermove', handlePointerMove, true);
+		window.addEventListener('click', handleClick, true);
+		document.addEventListener('visibilitychange', handleVisibilityChange, true);
+		window.addEventListener('focus', handleFocus, true);
+		window.addEventListener('blur', handleBlur, true);
 
 		lifecycleManagerService.commitVisible();
-		console.info('[HomeBackPreviewProbe] start', {
+		console.warn('[HomeBackPreviewProbe] start', {
 			activation,
 			launchReason: webOSSystem.launchReason,
 			visibilityState: document.visibilityState,
@@ -143,7 +146,7 @@ export const PreviewInputProbe = ({
 
 		const snapshotTimer = setInterval(snapshot, SNAPSHOT_INTERVAL_MS);
 		const expiryTimer = setTimeout(() => {
-			console.info('[HomeBackPreviewProbe] timeout: committing hidden surface');
+			console.warn('[HomeBackPreviewProbe] timeout: committing hidden surface');
 			lifecycleManagerService.commitHidden();
 			onComplete();
 		}, PROBE_DURATION_MS);
@@ -151,15 +154,15 @@ export const PreviewInputProbe = ({
 		return () => {
 			clearInterval(snapshotTimer);
 			clearTimeout(expiryTimer);
-			document.removeEventListener('keydown', handleKeyDown, false);
-			document.removeEventListener('keyup', handleKeyUp, false);
-			document.removeEventListener('wheel', handleWheel, false);
-			document.removeEventListener('mousemove', handleMouseMove, false);
-			document.removeEventListener('pointermove', handlePointerMove, false);
-			document.removeEventListener('click', handleClick, false);
-			document.removeEventListener('visibilitychange', handleVisibilityChange, false);
-			window.removeEventListener('focus', handleFocus, false);
-			window.removeEventListener('blur', handleBlur, false);
+			window.removeEventListener('keydown', handleKeyDown, true);
+			window.removeEventListener('keyup', handleKeyUp, true);
+			window.removeEventListener('wheel', handleWheel, true);
+			window.removeEventListener('mousemove', handleMouseMove, true);
+			window.removeEventListener('pointermove', handlePointerMove, true);
+			window.removeEventListener('click', handleClick, true);
+			document.removeEventListener('visibilitychange', handleVisibilityChange, true);
+			window.removeEventListener('focus', handleFocus, true);
+			window.removeEventListener('blur', handleBlur, true);
 		};
 	}, [activation, onComplete]);
 
