@@ -26,7 +26,9 @@ export const App = (): JSX.Element | null => {
 
 		const handleRelaunch = (event: CustomEvent<ActivateType>): void => {
 			const revision = ++relaunchRevision;
-			console.warn('[HomeBackPreviewProbe] webOSRelaunch', event.detail);
+			console.warn(
+				`[HomeBackPreviewProbe] webOSRelaunch detail=${JSON.stringify(event.detail ?? {})}`,
+			);
 			if (event.detail?.intent === Intent.PreviewInputProbe) {
 				const showProbe = (): void => {
 					if (revision !== relaunchRevision) return;
@@ -39,7 +41,7 @@ export const App = (): JSX.Element | null => {
 
 				// A probe launched from an already-visible Ribbon must first quiesce
 				// the old Ribbon-owned keyboard and auto-hide machinery. Waiting here
-				// is experiment-only and does not affect the cold preview measurement.
+				// is experiment-only and does not affect the cold probe measurement.
 				if (!ribbonService.visible) {
 					showProbe();
 					return;
@@ -48,6 +50,7 @@ export const App = (): JSX.Element | null => {
 				ribbonService.hide();
 				void ribbonService.waitUntilHidden()
 					.catch(error => {
+						if (revision !== relaunchRevision) return;
 						console.warn('[HomeBackPreviewProbe] unable to quiesce Ribbon before probe', error);
 					})
 					.finally(showProbe);
