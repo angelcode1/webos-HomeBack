@@ -54,7 +54,7 @@
       "label": "Disney+ button",
       "short": {
         "action": "launch",
-        "id": "com.webos.app.hdmi2"
+        "id": "com.webos.app.hdmi1"
       },
       "long": {
         "action": "replace",
@@ -65,7 +65,7 @@
       "label": "LG Channels button",
       "short": {
         "action": "launch",
-        "id": "com.webos.app.hdmi3"
+        "id": "com.webos.app.hdmi4"
       },
       "long": {
         "action": "replace",
@@ -76,7 +76,7 @@
       "label": "Alexa button",
       "short": {
         "action": "launch",
-        "id": "com.webos.app.hdmi4"
+        "id": "cdp-30"
       },
       "long": {
         "action": "replace",
@@ -84,10 +84,10 @@
       }
     },
     "1111": {
-      "label": "Model-specific button (observed keycode 1111)",
+      "label": "Stan button",
       "short": {
         "action": "launch",
-        "id": "cdp-30"
+        "id": "com.webos.app.hdmi3"
       },
       "long": {
         "action": "replace",

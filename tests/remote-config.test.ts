@@ -79,26 +79,28 @@ test('top-level native replace retains the wider uinput keycode space', () => {
 	}), true);
 });
 
-test('bundled shortcut defaults correct labels without changing configured actions', () => {
+test('bundled shortcut defaults match the observed physical remote actions', () => {
 	const defaults = JSON.parse(fs.readFileSync(defaultsPath, 'utf8'));
+	assert.equal(defaults.keys['1038'].short.id, 'com.webos.app.hdmi1');
+	assert.equal(defaults.keys['1042'].short.id, 'com.webos.app.hdmi1');
 	assert.deepEqual(defaults.keys['1043'], {
 		label: 'LG Channels button',
-		short: { action: 'launch', id: 'com.webos.app.hdmi3' },
+		short: { action: 'launch', id: 'com.webos.app.hdmi4' },
 		long: { action: 'replace', keycode: 399 },
 	});
 	assert.deepEqual(defaults.keys['1086'], {
 		label: 'Alexa button',
-		short: { action: 'launch', id: 'com.webos.app.hdmi4' },
+		short: { action: 'launch', id: 'cdp-30' },
 		long: { action: 'replace', keycode: 400 },
 	});
 	assert.deepEqual(defaults.keys['1111'], {
-		label: 'Model-specific button (observed keycode 1111)',
-		short: { action: 'launch', id: 'cdp-30' },
+		label: 'Stan button',
+		short: { action: 'launch', id: 'com.webos.app.hdmi3' },
 		long: { action: 'replace', keycode: 401 },
 	});
 });
 
-test('default shortcut migration corrects labels only and preserves actions', () => {
+test('default shortcut migration updates known defaults while preserving customized keys', () => {
 	const config = {
 		version: 1 as const,
 		keys: {
@@ -125,7 +127,7 @@ test('default shortcut migration corrects labels only and preserves actions', ()
 	assert.deepEqual(config.keys['1043'], {
 		label: 'LG Channels button',
 		longPressMs: 900,
-		short: { action: 'launch', id: 'com.webos.app.hdmi3' },
+		short: { action: 'launch', id: 'com.webos.app.hdmi4' },
 		long: { action: 'replace', keycode: 399 },
 	});
 	assert.deepEqual(config.keys['1086'], {
@@ -134,8 +136,8 @@ test('default shortcut migration corrects labels only and preserves actions', ()
 		long: { action: 'replace', keycode: 400 },
 	});
 	assert.deepEqual(config.keys['1111'], {
-		label: 'Model-specific button (observed keycode 1111)',
-		short: { action: 'launch', id: 'cdp-30' },
+		label: 'Stan button',
+		short: { action: 'launch', id: 'com.webos.app.hdmi3' },
 		long: { action: 'replace', keycode: 401 },
 	});
 });
@@ -167,17 +169,17 @@ test('migration repairs the exact bad 0.4.16 shortcut rotation', () => {
 	assert.deepEqual(config.keys['1043'], {
 		label: 'LG Channels button',
 		longPressMs: 900,
-		short: { action: 'launch', id: 'com.webos.app.hdmi3' },
+		short: { action: 'launch', id: 'com.webos.app.hdmi4' },
 		long: { action: 'replace', keycode: 399 },
 	});
 	assert.deepEqual(config.keys['1086'], {
 		label: 'Alexa button',
-		short: { action: 'launch', id: 'com.webos.app.hdmi4' },
+		short: { action: 'launch', id: 'cdp-30' },
 		long: { action: 'replace', keycode: 400 },
 	});
 	assert.deepEqual(config.keys['1111'], {
-		label: 'Model-specific button (observed keycode 1111)',
-		short: { action: 'launch', id: 'cdp-30' },
+		label: 'Stan button',
+		short: { action: 'launch', id: 'com.webos.app.hdmi3' },
 		long: { action: 'replace', keycode: 401 },
 	});
 });
@@ -207,7 +209,7 @@ test('migration repairs known bad keys independently while preserving customized
 	assert.equal(migrateDefaultRemoteShortcuts(config), true);
 	assert.deepEqual(config.keys['1043'], {
 		label: 'LG Channels button',
-		short: { action: 'launch', id: 'com.webos.app.hdmi3' },
+		short: { action: 'launch', id: 'com.webos.app.hdmi4' },
 		long: { action: 'replace', keycode: 399 },
 	});
 	assert.deepEqual(config.keys['1086'], {
@@ -216,8 +218,8 @@ test('migration repairs known bad keys independently while preserving customized
 		long: { action: 'replace', keycode: 401 },
 	});
 	assert.deepEqual(config.keys['1111'], {
-		label: 'Model-specific button (observed keycode 1111)',
-		short: { action: 'launch', id: 'cdp-30' },
+		label: 'Stan button',
+		short: { action: 'launch', id: 'com.webos.app.hdmi3' },
 		long: { action: 'replace', keycode: 401 },
 	});
 });

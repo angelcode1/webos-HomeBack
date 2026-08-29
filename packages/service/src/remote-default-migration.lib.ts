@@ -1,64 +1,46 @@
 import type { RemoteConfig, RemoteMapping, TimedMapping } from './remote-config';
 
-type LabelMigration = {
-	oldLabel: string;
-	newLabel: string;
-};
-
 type ShortcutState = {
 	label: string;
 	shortId: string;
 	longKeycode: number;
 };
 
-const LABEL_MIGRATIONS: Record<string, LabelMigration> = {
-	'1043': {
-		oldLabel: 'Stan button',
-		newLabel: 'LG Channels button',
-	},
-	'1086': {
-		oldLabel: 'LG Channels button',
-		newLabel: 'Alexa button',
-	},
-	'1111': {
-		oldLabel: 'Alexa button',
-		newLabel: 'Model-specific button (observed keycode 1111)',
-	},
+type ShortcutMigration = {
+	desired: ShortcutState;
+	knownDefaults: ShortcutState[];
 };
 
-const BAD_0416_ROTATION: Record<string, ShortcutState> = {
+const SHORTCUT_MIGRATIONS: Record<string, ShortcutMigration> = {
+	'1042': {
+		desired: { label: 'Disney+ button', shortId: 'com.webos.app.hdmi1', longKeycode: 398 },
+		knownDefaults: [
+			{ label: 'Disney+ button', shortId: 'com.webos.app.hdmi2', longKeycode: 398 },
+		],
+	},
 	'1043': {
-		label: 'LG Channels button',
-		shortId: 'com.webos.app.hdmi4',
-		longKeycode: 400,
+		desired: { label: 'LG Channels button', shortId: 'com.webos.app.hdmi4', longKeycode: 399 },
+		knownDefaults: [
+			{ label: 'Stan button', shortId: 'com.webos.app.hdmi3', longKeycode: 399 },
+			{ label: 'LG Channels button', shortId: 'com.webos.app.hdmi4', longKeycode: 400 },
+			{ label: 'LG Channels button', shortId: 'com.webos.app.hdmi3', longKeycode: 399 },
+		],
 	},
 	'1086': {
-		label: 'Alexa button',
-		shortId: 'cdp-30',
-		longKeycode: 401,
+		desired: { label: 'Alexa button', shortId: 'cdp-30', longKeycode: 400 },
+		knownDefaults: [
+			{ label: 'LG Channels button', shortId: 'com.webos.app.hdmi4', longKeycode: 400 },
+			{ label: 'Alexa button', shortId: 'cdp-30', longKeycode: 401 },
+			{ label: 'Alexa button', shortId: 'com.webos.app.hdmi4', longKeycode: 400 },
+		],
 	},
 	'1111': {
-		label: 'Model-specific button (observed keycode 1111)',
-		shortId: 'com.webos.app.hdmi2',
-		longKeycode: 398,
-	},
-};
-
-const RESTORED_SHORTCUTS: Record<string, ShortcutState> = {
-	'1043': {
-		label: 'LG Channels button',
-		shortId: 'com.webos.app.hdmi3',
-		longKeycode: 399,
-	},
-	'1086': {
-		label: 'Alexa button',
-		shortId: 'com.webos.app.hdmi4',
-		longKeycode: 400,
-	},
-	'1111': {
-		label: 'Model-specific button (observed keycode 1111)',
-		shortId: 'cdp-30',
-		longKeycode: 401,
+		desired: { label: 'Stan button', shortId: 'com.webos.app.hdmi3', longKeycode: 401 },
+		knownDefaults: [
+			{ label: 'Alexa button', shortId: 'cdp-30', longKeycode: 401 },
+			{ label: 'Model-specific button (observed keycode 1111)', shortId: 'com.webos.app.hdmi2', longKeycode: 398 },
+			{ label: 'Model-specific button (observed keycode 1111)', shortId: 'cdp-30', longKeycode: 401 },
+		],
 	},
 };
 
@@ -78,36 +60,17 @@ const matchesShortcutState = (
 		mapping.long.keycode === state.longKeycode;
 };
 
-const repairBad0416Rotation = (config: RemoteConfig): boolean => {
+export const migrateDefaultRemoteShortcuts = (config: RemoteConfig): boolean => {
 	let changed = false;
 
-	for (const [key, badState] of Object.entries(BAD_0416_ROTATION)) {
+	for (const [key, migration] of Object.entries(SHORTCUT_MIGRATIONS)) {
 		const mapping = config.keys[key];
-		if (!matchesShortcutState(mapping, badState)) continue;
-
-		const restored = RESTORED_SHORTCUTS[key];
+		if (!migration.knownDefaults.some(state => matchesShortcutState(mapping, state))) continue;
 		config.keys[key] = {
 			...mapping,
-			label: restored.label,
-			short: { action: 'launch', id: restored.shortId },
-			long: { action: 'replace', keycode: restored.longKeycode },
-		};
-		changed = true;
-	}
-
-	return changed;
-};
-
-export const migrateDefaultRemoteShortcuts = (config: RemoteConfig): boolean => {
-	let changed = repairBad0416Rotation(config);
-
-	for (const [key, migration] of Object.entries(LABEL_MIGRATIONS)) {
-		const mapping = config.keys[key];
-		if (!mapping || mapping.label !== migration.oldLabel) continue;
-
-		config.keys[key] = {
-			...mapping,
-			label: migration.newLabel,
+			label: migration.desired.label,
+			short: { action: 'launch', id: migration.desired.shortId },
+			long: { action: 'replace', keycode: migration.desired.longKeycode },
 		};
 		changed = true;
 	}
