@@ -36,7 +36,7 @@ test('launch intents are parsed without making malformed params fatal', () => {
 		Intent.ShowHomeBack,
 	);
 	assert.equal(
-		parseActivateType('{"intent":"homeback:preview"}').intent,
+		parseActivateType('{"intent":"homeback:probe"}').intent,
 		Intent.PreviewInputProbe,
 	);
 	assert.deepEqual(parseActivateType('not-json'), {});
