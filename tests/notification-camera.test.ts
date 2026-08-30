@@ -12,23 +12,18 @@ import {
 	shouldSuppressPreviewToast,
 } from '../packages/service/src/notification.ts';
 
-const TEST_TOAST_BRANDING = {
-	sourceId: 'com.homebrew.homeback.service',
-	iconUrl: 'file:///media/developer/apps/usr/palm/applications/com.homebrew.homeback/icon80.png',
-};
+const TEST_SERVICE_ID = 'com.homebrew.homeback.service';
 
-test('passive camera toast uses webOS light mode, service-owned local icon and bounded message', () => {
+test('passive camera toast uses the compact webOS light type, service identity and bounded message', () => {
 	const toast = buildPreviewToastRequest({
 		title: 'Front Door',
 		message: 'Person detected '.repeat(10),
-	}, TEST_TOAST_BRANDING);
+	}, TEST_SERVICE_ID);
 
 	assert.equal(toast.type, 'light');
 	assert.equal(toast.message.length <= 60, true);
-	assert.equal(toast.sourceId, TEST_TOAST_BRANDING.sourceId);
-	assert.equal(toast.iconUrl, TEST_TOAST_BRANDING.iconUrl);
-	assert.equal(toast.iconUrl.endsWith('/icon80.png'), true);
-	assert.equal(toast.iconUrl.includes('?'), false);
+	assert.equal(toast.sourceId, TEST_SERVICE_ID);
+	assert.equal('iconUrl' in toast, false);
 });
 
 test('camera registry stores receipt time and expires recent-event URLs conservatively', () => {
