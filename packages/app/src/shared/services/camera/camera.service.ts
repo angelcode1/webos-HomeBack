@@ -1,18 +1,7 @@
 import { makeAutoObservable } from 'mobx';
 
-import type { PreviewLaunchPayload } from 'shared/api/common';
-
 import { luna } from '../luna';
-
-export type CameraEntry = {
-	cameraId: string;
-	title: string;
-	message: string | null;
-	imageUrl: string;
-	durationMs: number;
-	receivedAt: number;
-	expiresAt: number;
-};
+import type { CameraEntry } from './camera.lib';
 
 export interface CameraProvider {
 	readonly cameras: CameraEntry[];
@@ -117,11 +106,3 @@ export class CameraService {
 		}));
 	}
 }
-
-export const cameraToPreviewPayload = (camera: CameraEntry): PreviewLaunchPayload => ({
-	title: camera.title,
-	...(camera.message ? { message: camera.message } : {}),
-	imageUrl: camera.imageUrl,
-	durationMs: camera.durationMs,
-	interactive: true,
-});

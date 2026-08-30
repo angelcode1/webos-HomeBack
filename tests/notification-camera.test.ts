@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { cameraToPreviewPayload } from '../packages/app/src/shared/services/camera/camera.service.ts';
+import { cameraToPreviewPayload } from '../packages/app/src/shared/services/camera/camera.lib.ts';
 import {
 	buildPreviewToastRequest,
 	buildRecentCameraEntry,
