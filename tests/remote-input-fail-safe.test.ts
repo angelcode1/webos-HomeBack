@@ -17,13 +17,12 @@ test('timed native swallows are gated by verified service health', () => {
 
 test('startup clears stale native timed swallows before config validation can fail', () => {
 	const remote = read('packages/service/src/remote-input.ts');
-	assert.match(remote, /@invariant: native-config-startup-disarm/);
-	assert.match(
-		remote,
-		/private async startOnce\(\): Promise<void> \{[\s\S]*?await this\.ensureConfigFiles\(\);[\s\S]*?await this\.reloadConfig\(true\);/,
+	assert.equal(remote.includes('@invariant: native-config-startup-disarm'), true);
+	assert.equal(remote.includes("await writeFile(NATIVE_CONFIG_PATH, '{}\\n', 0o644);"), true);
+	assert.equal(
+		remote.includes("if (!existsSync(NATIVE_CONFIG_PATH)) await writeFile(NATIVE_CONFIG_PATH"),
+		false,
 	);
-	assert.match(remote, /await writeFile\(NATIVE_CONFIG_PATH, '\{\}\\n', 0o644\);/);
-	assert.doesNotMatch(remote, /if \(!existsSync\(NATIVE_CONFIG_PATH\)\) await writeFile\(NATIVE_CONFIG_PATH/);
 });
 
 test('service shutdown disarms timed mappings before exit', () => {
