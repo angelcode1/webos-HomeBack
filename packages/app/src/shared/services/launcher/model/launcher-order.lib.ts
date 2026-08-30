@@ -13,6 +13,7 @@ export const sanitizePersistedOrder = (
 	return [...new Set(value)].filter(id => !builtinIds.has(id));
 };
 
+// Precondition: persisted order is deduplicated during hydration and on every order write.
 export const moveWithinPersistedOrder = (
 	order: readonly string[],
 	visibleIds: readonly string[],
