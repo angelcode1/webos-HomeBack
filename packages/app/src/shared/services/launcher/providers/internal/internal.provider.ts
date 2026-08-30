@@ -1,7 +1,10 @@
-import type { CameraService } from '../../../camera';
 import type { LaunchPointInput } from '../../api/launch-point.interface';
 import { genericInputIcon, svgIcon } from '../../model/icon-fallback';
 import type { LaunchPointsProvider, ProviderState } from '../launch-points.provider';
+
+type CameraAvailability = {
+	readonly cameras: readonly unknown[];
+};
 
 const keypadIcon = svgIcon([
 	'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
@@ -30,7 +33,7 @@ const plusIcon = svgIcon([
 export class InternalProvider implements LaunchPointsProvider {
 	public readonly state: ProviderState = 'ready';
 
-	public constructor(private readonly cameraService: CameraService) {}
+	public constructor(private readonly cameraService: CameraAvailability) {}
 
 	public get launchPoints(): LaunchPointInput[] {
 		const launchPoints: LaunchPointInput[] = [
