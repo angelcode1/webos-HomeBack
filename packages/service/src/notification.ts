@@ -1,5 +1,3 @@
-import { APP_ID, SERVICE_ID } from './environment';
-
 // Five seconds collapses camera detector bursts without hiding distinct events
 // for long. Suppressed events still refresh the recent-camera media reference.
 export const PREVIEW_TOAST_SUPPRESSION_MS = 5_000;
@@ -18,8 +16,6 @@ const PREVIEW_MIN_DURATION_MS = 1_000;
 const PREVIEW_DEFAULT_DURATION_MS = 8_000;
 const PREVIEW_MAX_DURATION_MS = 10_000;
 const DEFAULT_NOTIFICATION_KEY = '__default__';
-const TOAST_ICON_URL =
-	`file:///media/developer/apps/usr/palm/applications/${APP_ID}/icon80.png`;
 
 export type PreviewNotificationRequest = {
 	cameraId?: string;
@@ -31,6 +27,11 @@ export type PreviewNotificationRequest = {
 		imageUrl?: string;
 		durationMs?: number;
 	};
+};
+
+export type NotificationToastBranding = {
+	sourceId: string;
+	iconUrl: string;
 };
 
 export type NotificationToastRequest = {
@@ -77,6 +78,7 @@ export const getPreviewNotificationKey = (request: PreviewNotificationRequest): 
 
 export const buildPreviewToastRequest = (
 	request: PreviewNotificationRequest,
+	branding: NotificationToastBranding,
 ): NotificationToastRequest => {
 	const title = displayText(request.title, TITLE_MAX_LENGTH);
 	const message = displayText(request.message, MESSAGE_MAX_LENGTH) ?? 'Camera event';
@@ -84,8 +86,8 @@ export const buildPreviewToastRequest = (
 
 	return {
 		message: combined.slice(0, TOAST_MESSAGE_MAX_LENGTH),
-		sourceId: SERVICE_ID,
-		iconUrl: TOAST_ICON_URL,
+		sourceId: branding.sourceId,
+		iconUrl: branding.iconUrl,
 		type: 'light',
 	};
 };
