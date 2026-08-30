@@ -6,6 +6,23 @@ import { getUid } from './utils';
 
 const service = new Service();
 const bootstrap = new HomeBackBootstrap(service);
+let shuttingDown = false;
+
+const shutdownService = (exitCode = 0): void => {
+	if (shuttingDown) return;
+	shuttingDown = true;
+	void bootstrap.remoteInput.stop()
+		.catch(error => {
+			console.error('Unable to cleanly stop HomeBack remote input:', error);
+		})
+		.finally(() => process.exit(exitCode));
+};
+
+// `exit` is synchronous-only. Keep this as a last fail-open fallback if normal
+// async shutdown is skipped by an exception or direct process.exit call.
+process.once('exit', () => bootstrap.remoteInput.disarmTimedMappingsSync());
+process.once('SIGTERM', () => shutdownService(0));
+process.once('SIGINT', () => shutdownService(0));
 
 const selfStartRemoteInput = async (): Promise<void> => {
 	if (getUid() !== 0) return;
@@ -39,7 +56,7 @@ service.registerSimple('/remote/status', () => ({
 }));
 
 service.registerSimple('/restartService', () => {
-	setTimeout(() => process.exit(0), 100);
+	setTimeout(() => shutdownService(0), 100);
 	return { done: true };
 });
 
@@ -67,7 +84,7 @@ service.registerSimple('/restartApp', () => {
 
 if (__DEV__) {
 	service.registerSimple('/quit', () => {
-		setTimeout(() => process.exit(0), 100);
+		setTimeout(() => shutdownService(0), 100);
 		return { returnValue: true, message: 'Bye bye!' };
 	});
 }

@@ -36,7 +36,7 @@ test('event log tailing remains pinned to the opened inode after pathname replac
 	const lines: string[] = [];
 	try {
 		tailer.add(logPath, fd, 0, true);
-		tailer.poll(line => lines.push(line));
+		assert.equal(tailer.poll(line => lines.push(line)), true);
 		assert.deepEqual(lines, ['first']);
 
 		// Simulate a path swap after the privileged O_NOFOLLOW open. The tailer
@@ -44,7 +44,7 @@ test('event log tailing remains pinned to the opened inode after pathname replac
 		renameSync(logPath, originalPath);
 		symlinkSync(victimPath, logPath);
 		appendFileSync(originalPath, 'second\n');
-		tailer.poll(line => lines.push(line));
+		assert.equal(tailer.poll(line => lines.push(line)), true);
 		assert.deepEqual(lines, ['first', 'second']);
 		assert.equal(readFileSync(victimPath, 'utf8'), 'DO NOT TOUCH\n');
 
@@ -52,7 +52,7 @@ test('event log tailing remains pinned to the opened inode after pathname replac
 		// the sparse file, then ftruncate(fd) must truncate only the original inode.
 		ftruncateSync(fd, MAX_LOG_BYTES);
 		writeSync(fd, Buffer.from('\n'), 0, 1, MAX_LOG_BYTES - 1);
-		for (let index = 0; index < 12; index += 1) tailer.poll(() => undefined);
+		for (let index = 0; index < 12; index += 1) assert.equal(tailer.poll(() => undefined), true);
 		assert.equal(statSync(originalPath).size, 0);
 		assert.equal(readFileSync(victimPath, 'utf8'), 'DO NOT TOUCH\n');
 	} finally {
@@ -75,7 +75,7 @@ test('oversized log truncation stays safe for an already-open append-mode hook w
 	try {
 		ftruncateSync(readerFd, MAX_LOG_BYTES);
 		tailer.add(logPath, readerFd, MAX_LOG_BYTES, true);
-		tailer.poll(() => undefined);
+		assert.equal(tailer.poll(() => undefined), true);
 		assert.equal(statSync(logPath).size, 0);
 
 		writeSync(writerFd, Buffer.from('after-truncate\n'));
@@ -84,6 +84,23 @@ test('oversized log truncation stays safe for an already-open append-mode hook w
 		tailer.closeAll();
 		closeSync(writerFd);
 		try { closeSync(readerFd); } catch { /* already closed */ }
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('event log tailer reports a retained descriptor failure as unhealthy', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'homeback-log-health-test-'));
+	const logPath = join(dir, 'hook.log');
+	writeFileSync(logPath, '', { mode: 0o600 });
+
+	const fd = openSync(logPath, fsConstants.O_RDWR | fsConstants.O_NOFOLLOW);
+	const tailer = new EventLogTailer();
+	try {
+		tailer.add(logPath, fd, 0, true);
+		closeSync(fd);
+		assert.equal(tailer.poll(() => undefined), false);
+	} finally {
+		tailer.closeAll();
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
