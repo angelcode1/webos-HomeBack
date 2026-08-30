@@ -1,7 +1,7 @@
 import { readLaunchPointIcon, type IconRequest } from './app-catalog';
 import { HomeBackBootstrap } from './bootstrap';
 import { Service } from './bus';
-import { APPLICATION_MANAGER_URI, APP_ID } from './environment';
+import { APPLICATION_MANAGER_URI, APP_ID, SERVICE_ID } from './environment';
 import {
 	buildPreviewToastRequest,
 	PreviewNotificationState,
@@ -10,6 +10,10 @@ import {
 import { getUid } from './utils';
 
 const NOTIFICATION_URI = 'luna://com.webos.notification';
+const TOAST_BRANDING = {
+	sourceId: SERVICE_ID,
+	iconUrl: `file:///media/developer/apps/usr/palm/applications/${APP_ID}/icon80.png`,
+} as const;
 const previewNotificationState = new PreviewNotificationState();
 
 const service = new Service();
@@ -78,7 +82,7 @@ service.registerSimple<PreviewNotificationRequest>('/notification/createPreviewT
 	try {
 		await service.oneshot(
 			`${NOTIFICATION_URI}/createToast`,
-			buildPreviewToastRequest(normalizedRequest),
+			buildPreviewToastRequest(normalizedRequest, TOAST_BRANDING),
 		);
 	} catch (error) {
 		if (prepared.reservedAt !== null) {
