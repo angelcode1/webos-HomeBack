@@ -12,6 +12,7 @@ import type {
 	LaunchPointInput,
 	LaunchPointInstance,
 } from '../api/launch-point.interface';
+import { sanitizePersistedOrder } from './launcher-order.lib';
 import { LaunchPoint } from './launch-point.model';
 import type { LaunchPointsProvider } from '../providers';
 
@@ -53,21 +54,6 @@ export class LauncherService implements LaunchPointActions {
 			() => this.providers.flatMap(provider => provider.launchPoints),
 			snapshots => this.reconcileLaunchPoints(snapshots),
 			{ fireImmediately: true },
-		);
-
-		reaction(
-			() => ({
-				settled: this.fulfilled,
-				validIds: this.launchPoints.filter(lp => !lp.builtin).map(lp => lp.launchPointId),
-			}),
-			({ settled, validIds }) => {
-				if (!settled) return;
-				const valid = new Set(validIds);
-				const pruned = this.settingsService.order.filter(id => valid.has(id));
-				if (pruned.length !== this.settingsService.order.length) {
-					this.settingsService.order = pruned;
-				}
-			},
 		);
 	}
 
@@ -158,11 +144,7 @@ export class LauncherService implements LaunchPointActions {
 
 	private set order(value: string[]) {
 		if (!this.fulfilled) return;
-
-		const nonBuiltinIds = new Set(
-			this.launchPoints.filter(item => !item.builtin).map(item => item.launchPointId),
-		);
-		this.settingsService.order = [...new Set(value)].filter(id => nonBuiltinIds.has(id));
+		this.settingsService.order = sanitizePersistedOrder(value, this.launchPoints);
 	}
 
 	private reconcileLaunchPoints(snapshots: LaunchPointInput[]): void {
