@@ -28,6 +28,16 @@ about one second. A reboot is not required for ordinary mapping changes.
 > HomeBack 0.4.17, the three known stale shipped labels are corrected when they still
 > exactly match the old labels; custom labels and actions are left unchanged.
 
+> **Safety validation:** timed mappings and direct `ignore` mappings are rejected
+> when their physical **source** key is one of the standard system-critical codes:
+> OK/Enter `28`, D-pad `103`/`105`/`106`/`108`, mute `113`, volume `114`/`115`,
+> power `116`, or Back `412`. The whole edited config is rejected rather than
+> silently dropping one mapping, so correct the offending source key before retrying.
+> HomeBack clears service-dependent native timed `ignore` entries before startup
+> validation, so an invalid config fails open instead of leaving those keys swallowed.
+> Remote models can report different physical codes; use the event logs below to
+> verify the actual code on the TV before assigning a timed shortcut.
+
 ## Default configuration
 
 Fresh installs of HomeBack 0.4.17 start with:
@@ -231,7 +241,8 @@ MICOM `0x72`/`0x71`/`0x63`/`0x61`.
 }
 ```
 
-The original key event is consumed.
+The original key event is consumed. Direct `ignore` is not permitted for the
+reserved system-critical source keycodes listed above.
 
 ### Pass a key through unchanged
 
@@ -267,7 +278,10 @@ vi /home/root/.config/homeback/remote-buttons.json
 ```
 
 Save valid JSON. HomeBack keeps the previous working configuration if a new
-file fails validation.
+file fails validation during a live reload. On helper startup, invalid
+configuration prevents timed shortcuts from arming, while the generated native
+file is first cleared of service-dependent timed `ignore` entries so ordinary
+TV keys fail open.
 
 Check the active HomeBack remote subsystem with:
 
@@ -278,13 +292,18 @@ luna-send -n 1 -f \
 ```
 
 A healthy HomeBack-owned state reports `started:true`,
-`legacyInputHookDetected:false`, and `nativeOwnershipVerified:true`. Active
-entries in `injected` include a `source` field: `injected` means this helper
-performed and verified the native injection; `adopted` means a recreated helper
-found the existing HomeBack library in `/proc/<pid>/maps` and safely resumed
-ownership without injecting it again. If `blockedHooks` is non-empty, do not
-force another injection; inspect the reported reason/path and restart the native
-target (normally by rebooting) if required.
+`legacyInputHookDetected:false`, `nativeOwnershipVerified:true`,
+`eventTailerHealthy:true`, and `timedMappingsArmed:true`. Active entries in
+`injected` include a `source` field: `injected` means this helper performed and
+verified the native injection; `adopted` means a recreated helper found the
+existing HomeBack library in `/proc/<pid>/maps` and safely resumed ownership
+without injecting it again. If `timedMappingsArmed:false`, HomeBack deliberately
+leaves short/long shortcut source keys native/pass-through because it cannot
+prove that it can service them; check `eventTailerHealthy`,
+`nativeOwnershipVerified`, `blockedHooks`, and `injected` before treating a
+missing HOME shortcut as a mapping regression. If `blockedHooks` is non-empty,
+do not force another injection; inspect the reported reason/path and restart the
+native target (normally by rebooting) if required.
 
 ## Finding key codes
 
@@ -303,6 +322,12 @@ tail -F /tmp/homeback-inputhook-*.log
 Press the button you want to identify and look for the reported key code. A
 single physical press can be visible in more than one hooked process; HomeBack
 handles duplicate timed events internally.
+
+If a D-pad direction, OK, Back, or another system key stops behaving on a
+particular remote model, compare its observed physical keycode with the source
+keys in `remote-buttons.json` and `keybinds.json`. A model-specific code can
+collide with a shortcut such as `773`, `1042`, or another default even when the
+standard Linux D-pad codes themselves are reserved.
 
 ## Recovery
 
