@@ -10,10 +10,6 @@ import {
 import { getUid } from './utils';
 
 const NOTIFICATION_URI = 'luna://com.webos.notification';
-const TOAST_BRANDING = {
-	sourceId: SERVICE_ID,
-	iconUrl: `file:///media/developer/apps/usr/palm/applications/${APP_ID}/icon80.png`,
-} as const;
 const previewNotificationState = new PreviewNotificationState();
 
 const service = new Service();
@@ -82,7 +78,7 @@ service.registerSimple<PreviewNotificationRequest>('/notification/createPreviewT
 	try {
 		await service.oneshot(
 			`${NOTIFICATION_URI}/createToast`,
-			buildPreviewToastRequest(normalizedRequest, TOAST_BRANDING),
+			buildPreviewToastRequest(normalizedRequest, SERVICE_ID),
 		);
 	} catch (error) {
 		if (prepared.reservedAt !== null) {
