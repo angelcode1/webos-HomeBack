@@ -3,7 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
-import { sanitizePersistedOrder } from '../packages/app/src/shared/services/launcher/model/launcher-order.lib.ts';
+import {
+	moveWithinPersistedOrder,
+	sanitizePersistedOrder,
+} from '../packages/app/src/shared/services/launcher/model/launcher-order.lib.ts';
 
 const read = (relativePath: string): string =>
 	fs.readFileSync(path.resolve(process.cwd(), relativePath), 'utf8');
@@ -29,9 +32,23 @@ test('persisted launcher order excludes only known builtins and deduplicates ids
 	);
 });
 
-test('launcher service never prunes persisted order from provider snapshots', () => {
+test('moving visible launch points preserves transiently missing persisted ids', () => {
+	assert.deepEqual(
+		moveWithinPersistedOrder(
+			['app.one', 'temporarily-missing', 'app.two', 'app.three'],
+			['app.one', 'app.two', 'app.three'],
+			'app.one',
+			1,
+		),
+		['app.two', 'temporarily-missing', 'app.one', 'app.three'],
+	);
+});
+
+test('launcher service never rebuilds persisted order from provider snapshots', () => {
 	const launcher = read('packages/app/src/shared/services/launcher/model/launcher.service.ts');
 	assert.match(launcher, /sanitizePersistedOrder\(value, this\.launchPoints\)/);
+	assert.match(launcher, /moveWithinPersistedOrder\(/);
 	assert.doesNotMatch(launcher, /validIds/);
 	assert.doesNotMatch(launcher, /const pruned/);
+	assert.doesNotMatch(launcher, /const ids = this\.visible/);
 });

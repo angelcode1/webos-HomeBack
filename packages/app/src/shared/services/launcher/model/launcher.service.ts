@@ -12,7 +12,10 @@ import type {
 	LaunchPointInput,
 	LaunchPointInstance,
 } from '../api/launch-point.interface';
-import { sanitizePersistedOrder } from './launcher-order.lib';
+import {
+	moveWithinPersistedOrder,
+	sanitizePersistedOrder,
+} from './launcher-order.lib';
 import { LaunchPoint } from './launch-point.model';
 import type { LaunchPointsProvider } from '../providers';
 
@@ -124,18 +127,16 @@ export class LauncherService implements LaunchPointActions {
 	}
 
 	public move(launchPoint: LaunchPointInstance, shift: number): void {
-		if (shift !== -1 && shift !== 1) return;
-
-		const ids = this.visible
+		const visibleIds = this.visible
 			.filter(item => !item.builtin)
 			.map(item => item.launchPointId);
-		const from = ids.indexOf(launchPoint.launchPointId);
-		const to = from + shift;
-		if (from < 0 || to < 0 || to >= ids.length) return;
-
-		ids.splice(from, 1);
-		ids.splice(to, 0, launchPoint.launchPointId);
-		this.order = ids;
+		const nextOrder = moveWithinPersistedOrder(
+			this.order,
+			visibleIds,
+			launchPoint.launchPointId,
+			shift,
+		);
+		if (nextOrder) this.order = nextOrder;
 	}
 
 	private get order(): string[] {
