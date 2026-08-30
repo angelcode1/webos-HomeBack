@@ -49,8 +49,10 @@ Use the D-pad or Magic Remote wheel in the app drawer. HomeBack keeps drawer whe
 
 HomeBack has two deliberately different camera-notification paths:
 
-- **Passive notification** — Home Assistant calls HomeBack's `/notification/createPreviewToast` service method. webOS shows a native **light** toast using HomeBack's packaged 80×80 icon. It does not take D-pad focus from the app you are watching.
+- **Passive notification** — Home Assistant calls HomeBack's `/notification/createPreviewToast` service method. webOS shows its native compact top-right toast and keeps the app you are watching in control of the D-pad. On the tested webOS 10 TV, `type: "light"` selects this compact toast form; it does **not** force a light-coloured theme, and service-sourced toasts use the generic webOS information icon rather than HomeBack branding.
 - **Interactive video/image preview** — Home Assistant explicitly launches `homeback:preview` with `interactive:true`. HomeBack shows its own **bright top-right** preview, intentionally owns remote input while it is visible, dismisses on **Back**, and enforces a hard maximum of 10 seconds.
+
+This is an intentional platform tradeoff: the native toast preserves underlying-app input but webOS controls its pixels, while the HomeBack interactive preview controls its appearance but owns input while visible.
 
 Passive notifications are suppressed for **5 seconds per camera ID** to collapse detector bursts. A suppressed event still refreshes the camera's newest media URL, so a burst of detections produces one toast while the Cameras tile points at the most recent event.
 
@@ -100,7 +102,7 @@ luna-send -n 1 -f \
   }'
 ```
 
-The interactive card is always rendered with HomeBack's bright palette at the **top-right** of the screen. The native passive toast separately requests webOS `type: "light"`; HomeBack does not try to theme the rest of the TV UI.
+The interactive card is always rendered with HomeBack's bright palette at the **top-right** of the screen. The native passive toast separately uses webOS `type: "light"` only to select the compact toast form; webOS still owns its colours and system icon.
 
 ### Calling HomeBack from a Home Assistant automation
 
