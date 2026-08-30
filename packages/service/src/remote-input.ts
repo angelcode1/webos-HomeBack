@@ -1031,7 +1031,7 @@ export class RemoteInputManager {
 		}
 		this.injectionFailures.set(target.pid, {
 			name: target.name,
-			startTimeTicks,
+			startTimeTicks: target.startTimeTicks,
 			failures,
 			nextAttemptAt: Date.now() + retryDelay,
 			lastError: error,
