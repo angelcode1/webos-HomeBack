@@ -91,7 +91,7 @@ test('preview image failures are explicit without logging camera URLs', () => {
 	assert.equal(preview.includes('console.warn(payload.imageUrl'), false);
 });
 
-test('preview presentation is always light and anchored top-right', () => {
+test('preview presentation uses the bright theme and stays anchored top-right', () => {
 	const styles = readFileSync(
 		path.join(APP_SRC, 'features/preview/preview.module.scss'),
 		'utf8',
@@ -126,7 +126,7 @@ test('foreign app launches dismiss the focus-owning preview with all features', 
 	assert.equal(controller.includes('surfaceService.dismissFeatures()'), true);
 });
 
-test('native preview alerts replace per camera and never raw-spread producer preview data', () => {
+test('passive camera notifications use light toasts and retain per-camera serialization', () => {
 	const service = readFileSync(
 		path.join(process.cwd(), 'packages/service/src/index.ts'),
 		'utf8',
@@ -135,11 +135,34 @@ test('native preview alerts replace per camera and never raw-spread producer pre
 		path.join(process.cwd(), 'packages/service/src/notification.ts'),
 		'utf8',
 	);
-	assert.equal(service.includes('activePreviewAlerts'), true);
-	assert.equal(service.includes('runPreviewAlertSerial'), true);
-	assert.equal(service.includes('/closeAlert`'), true);
-	assert.equal(notification.includes('cameraId?: string'), true);
-	assert.equal(notification.includes('...preview,'), false);
+	assert.equal(service.includes('runPreviewToastSerial'), true);
+	assert.equal(service.includes('/createToast`'), true);
+	assert.equal(service.includes('createAlert'), false);
+	assert.equal(service.includes('closeAlert'), false);
+	assert.equal(notification.includes("type: 'light'"), true);
+	assert.equal(notification.includes('PREVIEW_TOAST_SUPPRESSION_MS = 5_000'), true);
+	assert.equal(notification.includes('iconUrl?: string'), false);
+	assert.equal(notification.includes('PreviewNotificationState'), true);
+});
+
+test('Cameras stays behind an app-level coordinator and only appears with recent cameras', () => {
+	const controller = readFileSync(path.join(APP_SRC, 'app/app.controller.ts'), 'utf8');
+	const launcher = readFileSync(
+		path.join(APP_SRC, 'shared/services/launcher/model/launcher.service.ts'),
+		'utf8',
+	);
+	const internalProvider = readFileSync(
+		path.join(APP_SRC, 'shared/services/launcher/providers/internal/internal.provider.ts'),
+		'utf8',
+	);
+
+	assert.equal(internalProvider.includes('this.cameraService.cameras.length > 0'), true);
+	assert.equal(internalProvider.includes("internalAction: 'openCameras'"), true);
+	assert.equal(launcher.includes("this.emitter.emit('openCameras')"), true);
+	assert.equal(launcher.includes('features/preview'), false);
+	assert.equal(controller.includes("emitter.on('openCameras', this.openCameras)"), true);
+	assert.equal(controller.includes('cameraToPreviewPayload(camera)'), true);
+	assert.equal(controller.includes('previewService.show('), true);
 });
 
 test('root autostart remains remote-only and never prelaunches UI', () => {

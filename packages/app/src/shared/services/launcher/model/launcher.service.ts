@@ -22,6 +22,7 @@ import { LaunchPoint } from './launch-point.model';
 type LauncherEvents = {
 	openDrawer: void;
 	openNumericKeyboard: void;
+	openCameras: void;
 };
 
 const isInternalParams = (
@@ -101,6 +102,10 @@ export class LauncherService implements LaunchPointActions {
 
 				case 'openNumericKeyboard':
 					this.emitter.emit('openNumericKeyboard');
+					return { returnValue: true };
+
+				case 'openCameras':
+					this.emitter.emit('openCameras');
 					return { returnValue: true };
 
 				case 'showInputPicker':

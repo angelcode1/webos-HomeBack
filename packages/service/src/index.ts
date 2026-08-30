@@ -3,20 +3,16 @@ import { HomeBackBootstrap } from './bootstrap';
 import { Service } from './bus';
 import { APPLICATION_MANAGER_URI, APP_ID } from './environment';
 import {
-	buildPreviewAlertRequest,
-	getPreviewAlertKey,
-	type PreviewAlertRequest,
+	buildPreviewToastRequest,
+	getPreviewNotificationKey,
+	PreviewNotificationState,
+	type PreviewNotificationRequest,
 } from './notification';
 import { getUid } from './utils';
 
-type NotificationResponse = {
-	returnValue: true;
-	alertId?: string;
-};
-
 const NOTIFICATION_URI = 'luna://com.webos.notification';
-const activePreviewAlerts = new Map<string, string>();
-const previewAlertQueues = new Map<string, Promise<void>>();
+const previewNotificationState = new PreviewNotificationState();
+const previewToastQueues = new Map<string, Promise<void>>();
 
 const service = new Service();
 const bootstrap = new HomeBackBootstrap(service);
@@ -38,18 +34,18 @@ process.once('exit', () => bootstrap.remoteInput.disarmTimedMappingsSync());
 process.once('SIGTERM', () => shutdownService(0));
 process.once('SIGINT', () => shutdownService(0));
 
-const runPreviewAlertSerial = async <T>(
+const runPreviewToastSerial = async <T>(
 	key: string,
 	task: () => Promise<T>,
 ): Promise<T> => {
-	const previous = previewAlertQueues.get(key) ?? Promise.resolve();
+	const previous = previewToastQueues.get(key) ?? Promise.resolve();
 	const run = previous.catch(() => undefined).then(task);
 	const tail = run.then(() => undefined, () => undefined);
-	previewAlertQueues.set(key, tail);
+	previewToastQueues.set(key, tail);
 	try {
 		return await run;
 	} finally {
-		if (previewAlertQueues.get(key) === tail) previewAlertQueues.delete(key);
+		if (previewToastQueues.get(key) === tail) previewToastQueues.delete(key);
 	}
 };
 
@@ -84,35 +80,40 @@ service.registerSimple('/remote/status', () => ({
 	status: bootstrap.remoteInput.status(),
 }));
 
-service.registerSimple<PreviewAlertRequest>('/notification/createPreviewAlert', async request => {
+service.registerSimple<PreviewNotificationRequest>('/notification/createPreviewToast', async request => {
 	const normalizedRequest = request ?? {};
-	const key = getPreviewAlertKey(normalizedRequest);
+	const key = getPreviewNotificationKey(normalizedRequest);
 
-	return runPreviewAlertSerial(key, async () => {
-		const previousAlertId = activePreviewAlerts.get(key);
-		if (previousAlertId) {
-			activePreviewAlerts.delete(key);
-			try {
-				await service.oneshot(`${NOTIFICATION_URI}/closeAlert`, {
-					alertId: previousAlertId,
-				});
-			} catch (error) {
-				console.warn('Unable to close previous HomeBack preview alert:', error);
-			}
+	return runPreviewToastSerial(key, async () => {
+		const now = Date.now();
+		const prepared = previewNotificationState.prepare(normalizedRequest, now);
+
+		if (prepared.suppressed) {
+			return {
+				done: true,
+				suppressed: true,
+				cameraRegistered: Boolean(prepared.camera),
+			};
 		}
 
-		const response = await service.oneshot<NotificationResponse>(
-			`${NOTIFICATION_URI}/createAlert`,
-			buildPreviewAlertRequest(normalizedRequest),
+		await service.oneshot(
+			`${NOTIFICATION_URI}/createToast`,
+			buildPreviewToastRequest(normalizedRequest),
 		);
-		if (response.alertId) activePreviewAlerts.set(key, response.alertId);
+		previewNotificationState.markToastSent(key, now);
 
 		return {
 			done: true,
-			alertId: response.alertId ?? null,
+			suppressed: false,
+			cameraRegistered: Boolean(prepared.camera),
 		};
 	});
 });
+
+service.registerSimple('/cameras/list', () => ({
+	done: true,
+	cameras: previewNotificationState.listRecentCameras(),
+}));
 
 service.registerSimple('/restartService', () => {
 	setTimeout(() => shutdownService(0), 100);

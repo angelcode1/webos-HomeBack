@@ -1,3 +1,4 @@
+import type { CameraService } from '../../../camera';
 import type { LaunchPointInput } from '../../api/launch-point.interface';
 import { genericInputIcon, svgIcon } from '../../model/icon-fallback';
 import type { LaunchPointsProvider, ProviderState } from '../launch-points.provider';
@@ -13,6 +14,13 @@ const keypadIcon = svgIcon([
 	'</g></svg>',
 ].join(''));
 
+const cameraIcon = svgIcon([
+	'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
+	'<path d="M20 34h14l7-9h18l7 9h14v42H20z" fill="none" stroke="white" stroke-width="7" stroke-linejoin="round"/>',
+	'<circle cx="50" cy="55" r="13" fill="none" stroke="white" stroke-width="7"/>',
+	'</svg>',
+].join(''));
+
 const plusIcon = svgIcon([
 	'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
 	'<path d="M50 24v52M24 50h52" fill="none" stroke="white" stroke-width="8" stroke-linecap="round"/>',
@@ -22,26 +30,43 @@ const plusIcon = svgIcon([
 export class InternalProvider implements LaunchPointsProvider {
 	public readonly state: ProviderState = 'ready';
 
-	public readonly launchPoints: LaunchPointInput[] = [
-		{
-			id: process.env.APP_ID,
-			launchPointId: '@button:inputs',
-			title: 'Inputs',
-			builtin: true,
-			iconColor: '#242424',
-			icon: genericInputIcon,
-			params: { internalAction: 'showInputPicker' },
-		},
-		{
-			id: process.env.APP_ID,
-			launchPointId: '@button:keypad',
-			title: 'Keypad',
-			builtin: true,
-			iconColor: '#242424',
-			icon: keypadIcon,
-			params: { internalAction: 'openNumericKeyboard' },
-		},
-		{
+	public constructor(private readonly cameraService: CameraService) {}
+
+	public get launchPoints(): LaunchPointInput[] {
+		const launchPoints: LaunchPointInput[] = [
+			{
+				id: process.env.APP_ID,
+				launchPointId: '@button:inputs',
+				title: 'Inputs',
+				builtin: true,
+				iconColor: '#242424',
+				icon: genericInputIcon,
+				params: { internalAction: 'showInputPicker' },
+			},
+			{
+				id: process.env.APP_ID,
+				launchPointId: '@button:keypad',
+				title: 'Keypad',
+				builtin: true,
+				iconColor: '#242424',
+				icon: keypadIcon,
+				params: { internalAction: 'openNumericKeyboard' },
+			},
+		];
+
+		if (this.cameraService.cameras.length > 0) {
+			launchPoints.push({
+				id: process.env.APP_ID,
+				launchPointId: '@button:cameras',
+				title: 'Cameras',
+				builtin: true,
+				iconColor: '#242424',
+				icon: cameraIcon,
+				params: { internalAction: 'openCameras' },
+			});
+		}
+
+		launchPoints.push({
 			id: process.env.APP_ID,
 			launchPointId: '@intent:add_apps',
 			title: 'Add apps',
@@ -49,6 +74,8 @@ export class InternalProvider implements LaunchPointsProvider {
 			iconColor: '#242424',
 			icon: plusIcon,
 			params: { internalAction: 'openDrawer' },
-		},
-	];
+		});
+
+		return launchPoints;
+	}
 }

@@ -3,7 +3,8 @@ import type { LaunchPoint } from '../model/launch-point.model';
 export type InternalLaunchParams =
 	| { internalAction: 'openDrawer' }
 	| { internalAction: 'showInputPicker' }
-	| { internalAction: 'openNumericKeyboard' };
+	| { internalAction: 'openNumericKeyboard' }
+	| { internalAction: 'openCameras' };
 
 export type LaunchParams = InternalLaunchParams | Record<string, unknown>;
 

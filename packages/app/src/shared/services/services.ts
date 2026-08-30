@@ -1,9 +1,10 @@
+import { ActivationService } from './activation';
+import { CameraService, NotificationCameraProvider } from './camera';
+import { KeyboardService } from './keyboard';
 import { LauncherService } from './launcher/model/launcher.service';
 import { AppManagerProvider } from './launcher/providers/app-manager/app-manager.provider';
 import { InputProvider } from './launcher/providers/input-manager/input-manager.provider';
 import { InternalProvider } from './launcher/providers/internal/internal.provider';
-import { ActivationService } from './activation';
-import { KeyboardService } from './keyboard';
 import { SettingsService } from './settings';
 import { SurfaceService } from './surface';
 import { SystemInfoService } from './system-info';
@@ -16,11 +17,13 @@ export const surfaceService = new SurfaceService(
 	activationService.initialAction.type === 'none',
 );
 export const keyboardService = new KeyboardService();
+export const notificationCameraProvider = new NotificationCameraProvider();
+export const cameraService = new CameraService([notificationCameraProvider]);
 
 export const launchPointProviders = [
 	new InputProvider(),
 	new AppManagerProvider(),
-	new InternalProvider(),
+	new InternalProvider(cameraService),
 ];
 
 export const launcherService = new LauncherService(
