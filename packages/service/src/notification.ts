@@ -1,6 +1,11 @@
 import { APP_ID, SERVICE_ID } from './environment';
 
+// Five seconds collapses camera detector bursts without hiding distinct events
+// for long. Suppressed events still refresh the recent-camera media reference.
 export const PREVIEW_TOAST_SUPPRESSION_MS = 5_000;
+// Recent Cameras is an event convenience, not a durable camera directory. HA
+// signed proxy URLs rotate, so stop offering an old URL after a short window
+// rather than pretending HomeBack can refresh credentials on its own.
 export const RECENT_CAMERA_FRESHNESS_MS = 2 * 60_000;
 export const RECENT_CAMERA_MAX_ENTRIES = 32;
 
@@ -129,6 +134,7 @@ export type PreparedPreviewNotification = {
 	key: string;
 	camera: RecentCameraEntry | null;
 	suppressed: boolean;
+	reservedAt: number | null;
 };
 
 const TOAST_SUPPRESSION_MAX_KEYS = 64;
@@ -145,21 +151,19 @@ export class PreviewNotificationState {
 		const camera = buildRecentCameraEntry(request, now);
 		if (camera) this.upsertRecentCamera(camera);
 
+		const suppressed = shouldSuppressPreviewToast(this.lastToastAt.get(key), now);
+		if (!suppressed) this.reserveToast(key, now);
+
 		return {
 			key,
 			camera,
-			suppressed: shouldSuppressPreviewToast(this.lastToastAt.get(key), now),
+			suppressed,
+			reservedAt: suppressed ? null : now,
 		};
 	}
 
-	public markToastSent(key: string, sentAt = Date.now()): void {
-		this.lastToastAt.delete(key);
-		this.lastToastAt.set(key, sentAt);
-		while (this.lastToastAt.size > TOAST_SUPPRESSION_MAX_KEYS) {
-			const oldestKey = this.lastToastAt.keys().next().value as string | undefined;
-			if (oldestKey === undefined) break;
-			this.lastToastAt.delete(oldestKey);
-		}
+	public releaseToastReservation(key: string, reservedAt: number): void {
+		if (this.lastToastAt.get(key) === reservedAt) this.lastToastAt.delete(key);
 	}
 
 	public listRecentCameras(now = Date.now()): RecentCameraEntry[] {
@@ -168,6 +172,18 @@ export class PreviewNotificationState {
 		}
 		return [...this.recentCameras.values()]
 			.sort((left, right) => right.receivedAt - left.receivedAt);
+	}
+
+	private reserveToast(key: string, reservedAt: number): void {
+		// Reserve synchronously before the async LS2 createToast call. This makes
+		// concurrent burst requests deterministic without a per-camera Promise queue.
+		this.lastToastAt.delete(key);
+		this.lastToastAt.set(key, reservedAt);
+		while (this.lastToastAt.size > TOAST_SUPPRESSION_MAX_KEYS) {
+			const oldestKey = this.lastToastAt.keys().next().value as string | undefined;
+			if (oldestKey === undefined) break;
+			this.lastToastAt.delete(oldestKey);
+		}
 	}
 
 	private upsertRecentCamera(camera: RecentCameraEntry): void {
