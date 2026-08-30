@@ -9,6 +9,7 @@ import {
 	ftruncateSync,
 	openSync,
 	promises as fs,
+	writeFileSync,
 } from 'fs';
 import { basename, dirname, join } from 'path';
 
@@ -67,11 +68,11 @@ const INJECTION_WATCHDOG_MS = 15_000;
 
 type ActivePress = {
 	mapping: TimedMapping;
+	startedAtMs: number;
 	longFired: boolean;
 	longTimer: NodeJS.Timeout | null;
 	watchdogTimer: NodeJS.Timeout | null;
 };
-
 
 type LastRemoteKeyEvent = {
 	keycode: number;
@@ -132,8 +133,8 @@ type ProcTargetSnapshot = {
 type HookInspection = Pick<ProcTargetSnapshot, 'mapsReadable' | 'mappedHookPath'>;
 type TargetIdentity = Pick<ProcTargetSnapshot, 'pid' | 'name' | 'startTimeTicks'>;
 
-const serializeNativeConfig = (config: RemoteConfig): string =>
-	`${JSON.stringify(buildNativeKeybinds(config), null, '\t')}\n`;
+const serializeNativeConfig = (config: RemoteConfig, timedMappingsArmed: boolean): string =>
+	`${JSON.stringify(buildNativeKeybinds(config, timedMappingsArmed), null, '\t')}\n`;
 
 const actionThreshold = (mapping: TimedMapping, config: RemoteConfig): number =>
 	mapping.longPressMs ?? config.defaultLongPressMs ?? DEFAULT_LONG_PRESS_MS;
@@ -165,6 +166,8 @@ export class RemoteInputManager {
 	private configFingerprint = '';
 	private rejectedConfigFingerprint = '';
 	private started = false;
+	private timedMappingsArmed = false;
+	private eventTailerHealthy = false;
 	private readonly targets = new Map<number, InjectedTarget>();
 	private readonly blockedHooks = new Map<number, BlockedHook>();
 	private readonly injectionFailures = new Map<number, InjectionFailure>();
@@ -181,6 +184,7 @@ export class RemoteInputManager {
 	private processTimer: NodeJS.Timeout | null = null;
 	private configTimer: NodeJS.Timeout | null = null;
 	private startPromise: Promise<void> | null = null;
+	private nativeConfigWriteTail: Promise<void> = Promise.resolve();
 	private readonly processScans: CoalescedTask<void>;
 	private readonly configReloads: CoalescedTask<boolean>;
 
@@ -217,6 +221,42 @@ export class RemoteInputManager {
 		}
 	}
 
+	public async stop(): Promise<void> {
+		if (this.logTimer) clearInterval(this.logTimer);
+		if (this.processTimer) clearInterval(this.processTimer);
+		if (this.configTimer) clearInterval(this.configTimer);
+		this.logTimer = null;
+		this.processTimer = null;
+		this.configTimer = null;
+		this.started = false;
+		this.eventTailerHealthy = false;
+
+		for (const [keycode, active] of [...this.activePresses.entries()]) {
+			this.clearActivePress(keycode, active);
+		}
+
+		await this.setTimedMappingsArmed(false);
+		this.logTailer.closeAll();
+	}
+
+	/**
+	 * Last-resort synchronous exit hook. This cannot protect against SIGKILL or
+	 * power loss, but it covers normal process.exit, handled signals and most
+	 * JavaScript crashes without leaving service-dependent native ignores behind.
+	 */
+	public disarmTimedMappingsSync(): void {
+		try {
+			writeFileSync(
+				NATIVE_CONFIG_PATH,
+				serializeNativeConfig(this.config, false),
+				{ encoding: 'utf8', mode: 0o644 },
+			);
+			this.timedMappingsArmed = false;
+		} catch (error) {
+			console.error('Unable to synchronously disarm HomeBack timed remote mappings:', error);
+		}
+	}
+
 	public status(): Record<string, unknown> {
 		const mappedLegacyPids = [...this.blockedHooks.values()]
 			.filter(target => target.hookPath.includes(`/${LEGACY_SERVICE_ID}/`))
@@ -227,6 +267,8 @@ export class RemoteInputManager {
 			started: this.started,
 			configPath: REMOTE_CONFIG_PATH,
 			nativeConfigPath: NATIVE_CONFIG_PATH,
+			timedMappingsArmed: this.timedMappingsArmed,
+			eventTailerHealthy: this.eventTailerHealthy,
 			injected: [...this.targets.values()]
 				.filter(target => target.state === 'active')
 				.map(({ pid, name, source }) => ({ pid, name, source })),
@@ -264,18 +306,23 @@ export class RemoteInputManager {
 
 	private async startOnce(): Promise<void> {
 		await this.ensureConfigFiles();
+		// Timed entries remain absent from the native file until the helper has a
+		// verified hook and a readable event-log path to service the swallow.
 		await this.reloadConfig(true);
 		await fs.chmod(EZINJECT_PATH, 0o755);
 		await this.scanProcesses();
 
 		this.started = true;
-		this.logTimer = setInterval(() => this.logTailer.poll(line => this.parseLogLine(line)), LOG_POLL_MS);
+		this.logTimer = setInterval(() => {
+			void this.pollEventLogs();
+		}, LOG_POLL_MS);
 		this.processTimer = setInterval(() => {
 			void this.scanProcesses();
 		}, PROCESS_SCAN_MS);
 		this.configTimer = setInterval(() => {
 			void this.reloadConfig(false);
 		}, CONFIG_SCAN_MS);
+		await this.pollEventLogs();
 	}
 
 	private async ensureConfigFiles(): Promise<void> {
@@ -349,15 +396,7 @@ export class RemoteInputManager {
 			const parsed = JSON.parse(await fs.readFile(REMOTE_CONFIG_PATH, 'utf8')) as unknown;
 			if (!validateConfig(parsed)) throw new Error('Invalid remote-buttons.json schema');
 
-			const serialized = serializeNativeConfig(parsed);
-			let current = '';
-			try {
-				current = await fs.readFile(NATIVE_CONFIG_PATH, 'utf8');
-			} catch {
-				// Write below.
-			}
-			if (current !== serialized) await writeFile(NATIVE_CONFIG_PATH, serialized, 0o644);
-
+			await this.writeNativeConfig(parsed, this.timedMappingsArmed);
 			this.config = parsed;
 			this.configFingerprint = fingerprint;
 			this.rejectedConfigFingerprint = '';
@@ -366,6 +405,53 @@ export class RemoteInputManager {
 			this.rejectedConfigFingerprint = fingerprint;
 			if (force) throw error;
 			console.error('Failed to reload remote button mappings; keeping previous mappings:', error);
+		}
+	}
+
+	private writeNativeConfig(config: RemoteConfig, timedMappingsArmed: boolean): Promise<void> {
+		const serialized = serializeNativeConfig(config, timedMappingsArmed);
+		const run = this.nativeConfigWriteTail.catch(() => undefined).then(async () => {
+			let current = '';
+			try {
+				current = await fs.readFile(NATIVE_CONFIG_PATH, 'utf8');
+			} catch {
+				// Write below.
+			}
+			if (current !== serialized) await writeFile(NATIVE_CONFIG_PATH, serialized, 0o644);
+		});
+		this.nativeConfigWriteTail = run.catch(() => undefined);
+		return run;
+	}
+
+	// @invariant: timed-mapping-fail-safe
+	private async setTimedMappingsArmed(armed: boolean): Promise<void> {
+		if (this.timedMappingsArmed === armed) return;
+		const previous = this.timedMappingsArmed;
+		this.timedMappingsArmed = armed;
+		try {
+			await this.writeNativeConfig(this.config, armed);
+			console.warn(`[HomeBackRemote] timed mappings ${armed ? 'armed' : 'disarmed'}`);
+		} catch (error) {
+			if (this.timedMappingsArmed === armed) this.timedMappingsArmed = previous;
+			throw error;
+		}
+	}
+
+	private async syncTimedMappingsArmed(): Promise<void> {
+		const shouldArm =
+			this.started &&
+			this.eventTailerHealthy &&
+			this.logTailer.size > 0 &&
+			this.isNativeOwnershipVerified();
+		await this.setTimedMappingsArmed(shouldArm);
+	}
+
+	private async pollEventLogs(): Promise<void> {
+		this.eventTailerHealthy = this.logTailer.poll(line => this.parseLogLine(line));
+		try {
+			await this.syncTimedMappingsArmed();
+		} catch (error) {
+			console.error('Unable to update fail-safe timed remote mapping state:', error);
 		}
 	}
 
@@ -516,12 +602,19 @@ export class RemoteInputManager {
 
 	private async scanProcessesOnce(): Promise<void> {
 		const procTargets = await this.scanTargetProcesses();
-		if (!procTargets) return;
+		if (!procTargets) {
+			this.lastObservedTargets.clear();
+			await this.syncTimedMappingsArmed();
+			return;
+		}
 		this.lastObservedTargets.clear();
 		for (const [pid, target] of procTargets) this.lastObservedTargets.set(pid, target);
 
 		await this.pruneDeadProcessState(procTargets);
-		if (await this.reconcileLegacyMode(procTargets)) return;
+		if (await this.reconcileLegacyMode(procTargets)) {
+			await this.syncTimedMappingsArmed();
+			return;
+		}
 
 		const now = Date.now();
 		for (const target of procTargets.values()) {
@@ -551,6 +644,7 @@ export class RemoteInputManager {
 			}
 			await this.reconcileTarget(target);
 		}
+		await this.syncTimedMappingsArmed();
 	}
 
 	private async pruneDeadProcessState(
@@ -882,6 +976,7 @@ export class RemoteInputManager {
 				this.injectionFailures.delete(target.pid);
 				this.blockedHooks.delete(target.pid);
 				console.log(`HomeBack remote hook active in ${target.name} (${target.pid})`);
+				await this.syncTimedMappingsArmed();
 				return;
 			}
 
@@ -959,6 +1054,7 @@ export class RemoteInputManager {
 			target.injector = null;
 		}
 		this.logTailer.remove(target.logPath);
+		await this.syncTimedMappingsArmed();
 		await Promise.all([
 			fs.unlink(target.logPath).catch(() => undefined),
 			fs.unlink(target.injectorLogPath).catch(() => undefined),
@@ -1019,6 +1115,7 @@ export class RemoteInputManager {
 		const threshold = actionThreshold(mapping, this.config);
 		const active: ActivePress = {
 			mapping,
+			startedAtMs: Date.now(),
 			longFired: false,
 			longTimer: null,
 			watchdogTimer: null,
@@ -1038,6 +1135,12 @@ export class RemoteInputManager {
 		active.watchdogTimer = setTimeout(() => {
 			const current = this.activePresses.get(keycode);
 			if (current === active) {
+				const lastActionAt = this.lastActionAt.get(keycode) ?? 0;
+				if (lastActionAt < active.startedAtMs) {
+					console.warn(
+						`[HomeBackRemote] unserviced timed key keycode=${keycode} thresholdMs=${threshold}`,
+					);
+				}
 				console.warn(`Clearing stale remote key press for keycode ${keycode}.`);
 				this.clearActivePress(keycode, active);
 			}
@@ -1058,6 +1161,4 @@ export class RemoteInputManager {
 	private markActionFired(keycode: number): void {
 		this.lastActionAt.set(keycode, Date.now());
 	}
-
-
 }

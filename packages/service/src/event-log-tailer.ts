@@ -73,7 +73,12 @@ export class EventLogTailer {
 		for (const path of [...this.cursors.keys()]) this.remove(path);
 	}
 
-	public poll(onLine: (line: string) => void): void {
+	/**
+	 * Returns false if any retained cursor cannot be read safely. Callers that
+	 * depend on the log to recreate a natively-consumed key can then fail open.
+	 */
+	public poll(onLine: (line: string) => void): boolean {
+		let healthy = true;
 		for (const cursor of this.cursors.values()) {
 			try {
 				const stat = fstatSync(cursor.fd);
@@ -102,10 +107,12 @@ export class EventLogTailer {
 
 				this.rotateIfNeeded(cursor, stat.size);
 			} catch (error) {
+				healthy = false;
 				const code = (error as NodeJS.ErrnoException).code;
 				if (code !== 'EBADF') console.error(`Failed reading ${cursor.path}:`, error);
 			}
 		}
+		return healthy;
 	}
 
 	private rotateIfNeeded(cursor: EventLogCursor, knownSize: number): void {

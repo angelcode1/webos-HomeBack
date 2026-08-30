@@ -5,6 +5,7 @@ import test from 'node:test';
 
 import {
 	buildNativeKeybinds,
+	isReservedServiceDependentSourceKeycode,
 	validateConfig,
 } from '../packages/service/src/remote-config.ts';
 import { migrateDefaultRemoteShortcuts } from '../packages/service/src/remote-default-migration.lib.ts';
@@ -44,7 +45,33 @@ test('invalid keycodes and empty actions are rejected', () => {
 	}), false);
 });
 
-test('timed mappings become native ignore while pass is omitted', () => {
+test('system-critical source keycodes cannot become service-dependent swallows', () => {
+	for (const keycode of [28, 103, 105, 106, 108, 113, 114, 115, 116, 412]) {
+		assert.equal(isReservedServiceDependentSourceKeycode(keycode), true);
+		assert.equal(validateConfig({
+			version: 1,
+			keys: {
+				[keycode]: { short: { action: 'launch', id: 'com.example.app' } },
+			},
+		}), false);
+		assert.equal(validateConfig({
+			version: 1,
+			keys: {
+				[keycode]: { action: 'ignore' },
+			},
+		}), false);
+	}
+
+	// Explicit native pass-through is always safe, and a direct native replace
+	// does not depend on the HomeBack service/tailer to recreate the key event.
+	assert.equal(validateConfig({ version: 1, keys: { 103: { action: 'pass' } } }), true);
+	assert.equal(validateConfig({
+		version: 1,
+		keys: { 103: { action: 'replace', keycode: 105 } },
+	}), true);
+});
+
+test('timed mappings become native ignore only while service handling is armed', () => {
 	const config = {
 		version: 1 as const,
 		keys: {
@@ -53,8 +80,11 @@ test('timed mappings become native ignore while pass is omitted', () => {
 			'3': { action: 'replace' as const, keycode: 4 },
 		},
 	};
-	assert.deepEqual(buildNativeKeybinds(config), {
+	assert.deepEqual(buildNativeKeybinds(config, true), {
 		'1': { action: 'ignore' },
+		'3': { action: 'replace', keycode: 4 },
+	});
+	assert.deepEqual(buildNativeKeybinds(config, false), {
 		'3': { action: 'replace', keycode: 4 },
 	});
 });

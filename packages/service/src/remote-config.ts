@@ -30,6 +30,25 @@ export type RemoteConfig = {
 const MAX_KEYCODE = 0x7fffffff;
 const MAX_LONG_PRESS_MS = 60_000;
 
+// These system-critical source codes must never depend on the HomeBack helper
+// to re-emit an event after the native hook consumes it. A model-specific
+// shortcut collision should fail config validation rather than brick navigation.
+const RESERVED_SERVICE_DEPENDENT_SOURCE_KEYCODES = new Set([
+	28, // KEY_ENTER / OK
+	103, // KEY_UP
+	105, // KEY_LEFT
+	106, // KEY_RIGHT
+	108, // KEY_DOWN
+	113, // KEY_MUTE
+	114, // KEY_VOLUMEDOWN
+	115, // KEY_VOLUMEUP
+	116, // KEY_POWER
+	412, // KEY_PREVIOUS / BACK
+]);
+
+export const isReservedServiceDependentSourceKeycode = (value: unknown): value is number =>
+	isKeycode(value) && RESERVED_SERVICE_DEPENDENT_SOURCE_KEYCODES.has(value);
+
 export const isTimedMapping = (mapping: RemoteMapping): mapping is TimedMapping =>
 	'short' in mapping || 'long' in mapping || 'longPressMs' in mapping;
 
@@ -105,8 +124,10 @@ export const validateConfig = (input: unknown): input is RemoteConfig => {
 
 	for (const [key, raw] of Object.entries(input.keys)) {
 		if (!/^\d+$/.test(key) || !isKeycode(Number(key)) || !isPlainObject(raw)) return false;
+		const sourceKeycode = Number(key);
 
 		if ('short' in raw || 'long' in raw || 'longPressMs' in raw) {
+			if (isReservedServiceDependentSourceKeycode(sourceKeycode)) return false;
 			if (raw.short === undefined && raw.long === undefined) return false;
 			if (raw.short !== undefined && !validateAction(raw.short)) return false;
 			if (raw.long !== undefined && !validateAction(raw.long)) return false;
@@ -116,7 +137,9 @@ export const validateConfig = (input: unknown): input is RemoteConfig => {
 
 		switch (raw.action) {
 			case 'pass':
+				break;
 			case 'ignore':
+				if (isReservedServiceDependentSourceKeycode(sourceKeycode)) return false;
 				break;
 			case 'replace':
 				if (!isKeycode(raw.keycode)) return false;
@@ -135,12 +158,15 @@ export const validateConfig = (input: unknown): input is RemoteConfig => {
 	return true;
 };
 
-export const buildNativeKeybinds = (config: RemoteConfig): Record<string, Record<string, unknown>> => {
+export const buildNativeKeybinds = (
+	config: RemoteConfig,
+	timedMappingsArmed: boolean,
+): Record<string, Record<string, unknown>> => {
 	const native: Record<string, Record<string, unknown>> = {};
 
 	for (const [key, mapping] of Object.entries(config.keys)) {
 		if (isTimedMapping(mapping)) {
-			native[key] = { action: 'ignore' };
+			if (timedMappingsArmed) native[key] = { action: 'ignore' };
 			continue;
 		}
 
