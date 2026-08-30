@@ -71,17 +71,35 @@ test('suppressed burst events still refresh the newest camera URL and timestamp'
 
 	const first = state.prepare(request(1), 10_000);
 	assert.equal(first.suppressed, false);
-	state.markToastSent(first.key, 10_000);
+	assert.equal(first.reservedAt, 10_000);
 
 	for (let sequence = 2; sequence <= 5; sequence++) {
 		const prepared = state.prepare(request(sequence), 10_000 + sequence * 500);
 		assert.equal(prepared.suppressed, true);
+		assert.equal(prepared.reservedAt, null);
 	}
 
 	const [camera] = state.listRecentCameras(12_500);
 	assert.equal(camera.imageUrl, 'http://ha.local/camera?token=event-5');
 	assert.equal(camera.message, 'Detection 5');
 	assert.equal(camera.receivedAt, 12_500);
+});
+
+test('failed toast reservation can be released without muting the next event', () => {
+	const state = new PreviewNotificationState();
+	const request = {
+		cameraId: 'camera.driveway',
+		message: 'Vehicle detected',
+	};
+
+	const first = state.prepare(request, 20_000);
+	assert.equal(first.suppressed, false);
+	assert.equal(first.reservedAt, 20_000);
+	state.releaseToastReservation(first.key, first.reservedAt ?? -1);
+
+	const retry = state.prepare(request, 20_100);
+	assert.equal(retry.suppressed, false);
+	assert.equal(retry.reservedAt, 20_100);
 });
 
 test('camera coordinator converts registry entries to explicit interactive preview payloads', () => {
