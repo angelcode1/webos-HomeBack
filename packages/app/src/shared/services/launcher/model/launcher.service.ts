@@ -3,21 +3,21 @@ import mitt from 'mitt';
 
 import { APPLICATION_MANAGER_URI } from 'shared/api/common';
 
-import { LifecycleManagerService } from '../../lifecycle-manager';
 import { luna } from '../../luna';
 import { SettingsService } from '../../settings';
+import { SurfaceService } from '../../surface';
 import type {
 	InternalLaunchParams,
 	LaunchPointActions,
 	LaunchPointInput,
 	LaunchPointInstance,
 } from '../api/launch-point.interface';
+import type { LaunchPointsProvider } from '../providers';
 import {
 	moveWithinPersistedOrder,
 	sanitizePersistedOrder,
 } from './launcher-order.lib';
 import { LaunchPoint } from './launch-point.model';
-import type { LaunchPointsProvider } from '../providers';
 
 type LauncherEvents = {
 	openDrawer: void;
@@ -36,17 +36,17 @@ export class LauncherService implements LaunchPointActions {
 
 	public constructor(
 		private readonly settingsService: SettingsService,
-		private readonly lifecycleManager: LifecycleManagerService,
+		private readonly surfaceService: SurfaceService,
 		private readonly providers: LaunchPointsProvider[],
 	) {
 		makeAutoObservable<
 			LauncherService,
-			'settingsService' | 'lifecycleManager' | 'providers' | 'launchPointsMap'
+			'settingsService' | 'surfaceService' | 'providers' | 'launchPointsMap'
 		>(
 			this,
 			{
 				settingsService: false,
-				lifecycleManager: false,
+				surfaceService: false,
 				providers: false,
 				launchPointsMap: false,
 			},
@@ -104,12 +104,12 @@ export class LauncherService implements LaunchPointActions {
 					return { returnValue: true };
 
 				case 'showInputPicker':
-					await this.lifecycleManager.requestHideAndWait();
+					await this.surfaceService.yieldSurfaceAndWait();
 					return luna('luna://com.webos.surfacemanager/showInputPicker', {});
 			}
 		}
 
-		if (!builtin) this.lifecycleManager.broadcastHide();
+		if (!builtin) this.surfaceService.dismissFeatures();
 
 		return luna(`${APPLICATION_MANAGER_URI}/launch`, {
 			id: appId,

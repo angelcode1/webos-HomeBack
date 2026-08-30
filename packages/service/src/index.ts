@@ -1,8 +1,22 @@
-import { Service } from './bus';
 import { readLaunchPointIcon, type IconRequest } from './app-catalog';
-import { APPLICATION_MANAGER_URI, APP_ID } from './environment';
 import { HomeBackBootstrap } from './bootstrap';
+import { Service } from './bus';
+import { APPLICATION_MANAGER_URI, APP_ID } from './environment';
+import {
+	buildPreviewAlertRequest,
+	getPreviewAlertKey,
+	type PreviewAlertRequest,
+} from './notification';
 import { getUid } from './utils';
+
+type NotificationResponse = {
+	returnValue: true;
+	alertId?: string;
+};
+
+const NOTIFICATION_URI = 'luna://com.webos.notification';
+const activePreviewAlerts = new Map<string, string>();
+const previewAlertQueues = new Map<string, Promise<void>>();
 
 const service = new Service();
 const bootstrap = new HomeBackBootstrap(service);
@@ -23,6 +37,21 @@ const shutdownService = (exitCode = 0): void => {
 process.once('exit', () => bootstrap.remoteInput.disarmTimedMappingsSync());
 process.once('SIGTERM', () => shutdownService(0));
 process.once('SIGINT', () => shutdownService(0));
+
+const runPreviewAlertSerial = async <T>(
+	key: string,
+	task: () => Promise<T>,
+): Promise<T> => {
+	const previous = previewAlertQueues.get(key) ?? Promise.resolve();
+	const run = previous.catch(() => undefined).then(task);
+	const tail = run.then(() => undefined, () => undefined);
+	previewAlertQueues.set(key, tail);
+	try {
+		return await run;
+	} finally {
+		if (previewAlertQueues.get(key) === tail) previewAlertQueues.delete(key);
+	}
+};
 
 const selfStartRemoteInput = async (): Promise<void> => {
 	if (getUid() !== 0) return;
@@ -54,6 +83,36 @@ service.registerSimple('/remote/status', () => ({
 	done: true,
 	status: bootstrap.remoteInput.status(),
 }));
+
+service.registerSimple<PreviewAlertRequest>('/notification/createPreviewAlert', async request => {
+	const normalizedRequest = request ?? {};
+	const key = getPreviewAlertKey(normalizedRequest);
+
+	return runPreviewAlertSerial(key, async () => {
+		const previousAlertId = activePreviewAlerts.get(key);
+		if (previousAlertId) {
+			activePreviewAlerts.delete(key);
+			try {
+				await service.oneshot(`${NOTIFICATION_URI}/closeAlert`, {
+					alertId: previousAlertId,
+				});
+			} catch (error) {
+				console.warn('Unable to close previous HomeBack preview alert:', error);
+			}
+		}
+
+		const response = await service.oneshot<NotificationResponse>(
+			`${NOTIFICATION_URI}/createAlert`,
+			buildPreviewAlertRequest(normalizedRequest),
+		);
+		if (response.alertId) activePreviewAlerts.set(key, response.alertId);
+
+		return {
+			done: true,
+			alertId: response.alertId ?? null,
+		};
+	});
+});
 
 service.registerSimple('/restartService', () => {
 	setTimeout(() => shutdownService(0), 100);

@@ -3,7 +3,9 @@ import type { CSSProperties, MouseEvent } from 'react';
 
 import { observer } from 'mobx-react-lite';
 
-import { HOLD_THRESHOLD_MS, useRibbonService } from '../../services';
+import { HOLD_THRESHOLD_MS } from 'shared/services/keyboard';
+
+import { useRibbonService } from '../../services';
 import { AppIcon } from '../app-icon';
 import type { RibbonCardProps } from './ribbon-card.interface';
 

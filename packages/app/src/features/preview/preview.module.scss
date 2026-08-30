@@ -1,0 +1,60 @@
+.preview {
+	position: fixed;
+	top: 48px;
+	right: 48px;
+	width: 560px;
+	max-width: calc(100vw - 96px);
+	overflow: hidden;
+
+	color-scheme: light;
+	background: rgba(255, 255, 255, 0.98);
+	border: 1px solid rgba(17, 24, 39, 0.14);
+	border-radius: 18px;
+	box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+	color: #111827;
+	font-family: sans-serif;
+	pointer-events: none;
+}
+
+.image {
+	display: block;
+	width: 100%;
+	height: 315px;
+	object-fit: cover;
+	background: #f3f4f6;
+}
+
+.imageUnavailable {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	height: 315px;
+	background: #f3f4f6;
+	color: rgba(17, 24, 39, 0.72);
+	font-size: 18px;
+}
+
+.copy {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 16px 18px 14px;
+}
+
+.title {
+	font-size: 22px;
+	line-height: 1.2;
+}
+
+.message {
+	font-size: 17px;
+	line-height: 1.35;
+	color: rgba(17, 24, 39, 0.82);
+}
+
+.hint {
+	margin-top: 4px;
+	font-size: 14px;
+	color: rgba(17, 24, 39, 0.58);
+}

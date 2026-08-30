@@ -1,8 +1,8 @@
 import { makeAutoObservable, observable, reaction } from 'mobx';
 
+import { KeyboardService } from 'shared/services/keyboard';
 import { LauncherService, type LaunchPointInstance } from 'shared/services/launcher';
 
-import { KeyboardService } from '../keyboard';
 import { wheelShiftFromDelta } from './app-drawer.lib';
 
 const WHEEL_DETENT_COOLDOWN_MS = 90;
