@@ -140,9 +140,13 @@ test('passive camera notifications use light toasts and queue-free timestamp sup
 	assert.equal(service.includes('closeAlert'), false);
 	assert.equal(service.includes('runPreviewToastSerial'), false);
 	assert.equal(service.includes('previewToastQueues'), false);
+	assert.equal(service.includes('sourceId: SERVICE_ID'), true);
+	assert.equal(service.includes('/icon80.png`'), true);
+	assert.equal(service.includes('buildPreviewToastRequest(normalizedRequest, TOAST_BRANDING)'), true);
 	assert.equal(notification.includes("type: 'light'"), true);
 	assert.equal(notification.includes('PREVIEW_TOAST_SUPPRESSION_MS = 5_000'), true);
 	assert.equal(notification.includes('iconUrl?: string'), false);
+	assert.equal(notification.includes("from './environment'"), false);
 	assert.equal(notification.includes('PreviewNotificationState'), true);
 	assert.equal(notification.includes('releaseToastReservation'), true);
 	assert.equal(notification.includes('per-camera Promise queue'), true);
