@@ -364,7 +364,10 @@ export class RemoteInputManager {
 		}
 		await fs.chmod(REMOTE_CONFIG_PATH, 0o600);
 
-		if (!existsSync(NATIVE_CONFIG_PATH)) await writeFile(NATIVE_CONFIG_PATH, '{}\n', 0o644);
+		// @invariant: native-config-startup-disarm
+		// Preserve a legacy native file long enough for the migration above, then always
+		// clear service-dependent swallows before reloadConfig(true) can reject startup.
+		await writeFile(NATIVE_CONFIG_PATH, '{}\n', 0o644);
 	}
 
 	private reloadConfig(force: boolean): Promise<void> {
@@ -1028,7 +1031,7 @@ export class RemoteInputManager {
 		}
 		this.injectionFailures.set(target.pid, {
 			name: target.name,
-			startTimeTicks: target.startTimeTicks,
+			startTimeTicks,
 			failures,
 			nextAttemptAt: Date.now() + retryDelay,
 			lastError: error,
