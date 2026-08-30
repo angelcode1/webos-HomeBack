@@ -4,7 +4,6 @@ import { Service } from './bus';
 import { APPLICATION_MANAGER_URI, APP_ID } from './environment';
 import {
 	buildPreviewToastRequest,
-	getPreviewNotificationKey,
 	PreviewNotificationState,
 	type PreviewNotificationRequest,
 } from './notification';
@@ -12,7 +11,6 @@ import { getUid } from './utils';
 
 const NOTIFICATION_URI = 'luna://com.webos.notification';
 const previewNotificationState = new PreviewNotificationState();
-const previewToastQueues = new Map<string, Promise<void>>();
 
 const service = new Service();
 const bootstrap = new HomeBackBootstrap(service);
@@ -33,21 +31,6 @@ const shutdownService = (exitCode = 0): void => {
 process.once('exit', () => bootstrap.remoteInput.disarmTimedMappingsSync());
 process.once('SIGTERM', () => shutdownService(0));
 process.once('SIGINT', () => shutdownService(0));
-
-const runPreviewToastSerial = async <T>(
-	key: string,
-	task: () => Promise<T>,
-): Promise<T> => {
-	const previous = previewToastQueues.get(key) ?? Promise.resolve();
-	const run = previous.catch(() => undefined).then(task);
-	const tail = run.then(() => undefined, () => undefined);
-	previewToastQueues.set(key, tail);
-	try {
-		return await run;
-	} finally {
-		if (previewToastQueues.get(key) === tail) previewToastQueues.delete(key);
-	}
-};
 
 const selfStartRemoteInput = async (): Promise<void> => {
 	if (getUid() !== 0) return;
@@ -82,32 +65,36 @@ service.registerSimple('/remote/status', () => ({
 
 service.registerSimple<PreviewNotificationRequest>('/notification/createPreviewToast', async request => {
 	const normalizedRequest = request ?? {};
-	const key = getPreviewNotificationKey(normalizedRequest);
+	const prepared = previewNotificationState.prepare(normalizedRequest);
 
-	return runPreviewToastSerial(key, async () => {
-		const now = Date.now();
-		const prepared = previewNotificationState.prepare(normalizedRequest, now);
+	if (prepared.suppressed) {
+		return {
+			done: true,
+			suppressed: true,
+			cameraRegistered: Boolean(prepared.camera),
+		};
+	}
 
-		if (prepared.suppressed) {
-			return {
-				done: true,
-				suppressed: true,
-				cameraRegistered: Boolean(prepared.camera),
-			};
-		}
-
+	try {
 		await service.oneshot(
 			`${NOTIFICATION_URI}/createToast`,
 			buildPreviewToastRequest(normalizedRequest),
 		);
-		previewNotificationState.markToastSent(key, now);
+	} catch (error) {
+		if (prepared.reservedAt !== null) {
+			previewNotificationState.releaseToastReservation(
+				prepared.key,
+				prepared.reservedAt,
+			);
+		}
+		throw error;
+	}
 
-		return {
-			done: true,
-			suppressed: false,
-			cameraRegistered: Boolean(prepared.camera),
-		};
-	});
+	return {
+		done: true,
+		suppressed: false,
+		cameraRegistered: Boolean(prepared.camera),
+	};
 });
 
 service.registerSimple('/cameras/list', () => ({
