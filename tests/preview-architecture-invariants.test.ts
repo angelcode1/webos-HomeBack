@@ -126,7 +126,7 @@ test('foreign app launches dismiss the focus-owning preview with all features', 
 	assert.equal(controller.includes('surfaceService.dismissFeatures()'), true);
 });
 
-test('passive camera notifications use light toasts and retain per-camera serialization', () => {
+test('passive camera notifications use light toasts and queue-free timestamp suppression', () => {
 	const service = readFileSync(
 		path.join(process.cwd(), 'packages/service/src/index.ts'),
 		'utf8',
@@ -135,14 +135,17 @@ test('passive camera notifications use light toasts and retain per-camera serial
 		path.join(process.cwd(), 'packages/service/src/notification.ts'),
 		'utf8',
 	);
-	assert.equal(service.includes('runPreviewToastSerial'), true);
 	assert.equal(service.includes('/createToast`'), true);
 	assert.equal(service.includes('createAlert'), false);
 	assert.equal(service.includes('closeAlert'), false);
+	assert.equal(service.includes('runPreviewToastSerial'), false);
+	assert.equal(service.includes('previewToastQueues'), false);
 	assert.equal(notification.includes("type: 'light'"), true);
 	assert.equal(notification.includes('PREVIEW_TOAST_SUPPRESSION_MS = 5_000'), true);
 	assert.equal(notification.includes('iconUrl?: string'), false);
 	assert.equal(notification.includes('PreviewNotificationState'), true);
+	assert.equal(notification.includes('releaseToastReservation'), true);
+	assert.equal(notification.includes('per-camera Promise queue'), true);
 });
 
 test('Cameras stays behind an app-level coordinator and only appears with recent cameras', () => {
@@ -155,6 +158,10 @@ test('Cameras stays behind an app-level coordinator and only appears with recent
 		path.join(APP_SRC, 'shared/services/launcher/providers/internal/internal.provider.ts'),
 		'utf8',
 	);
+	const notification = readFileSync(
+		path.join(process.cwd(), 'packages/service/src/notification.ts'),
+		'utf8',
+	);
 
 	assert.equal(internalProvider.includes('this.cameraService.cameras.length > 0'), true);
 	assert.equal(internalProvider.includes("internalAction: 'openCameras'"), true);
@@ -163,6 +170,9 @@ test('Cameras stays behind an app-level coordinator and only appears with recent
 	assert.equal(controller.includes("emitter.on('openCameras', this.openCameras)"), true);
 	assert.equal(controller.includes('cameraToPreviewPayload(camera)'), true);
 	assert.equal(controller.includes('previewService.show('), true);
+	assert.equal(notification.includes('receivedAt: number'), true);
+	assert.equal(notification.includes('expiresAt: number'), true);
+	assert.equal(notification.includes('RECENT_CAMERA_FRESHNESS_MS = 2 * 60_000'), true);
 });
 
 test('root autostart remains remote-only and never prelaunches UI', () => {
