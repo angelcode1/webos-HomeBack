@@ -70,10 +70,6 @@ export class HomeBackBootstrap {
 			throw new ServiceError('HomeBack helper service is not running as root.', -401);
 		}
 
-		// Fail open before migration or config validation. A previous SIGKILL or
-		// power loss can leave service-dependent native ignore entries behind; the
-		// next helper start must clear those even if the user config is now invalid.
-		this.remoteInput.disarmTimedMappingsSync();
 		await migrateRemoteDefaultsFile(REMOTE_CONFIG_PATH);
 		await this.remoteInput.start();
 	}
