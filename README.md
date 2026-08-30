@@ -1,6 +1,6 @@
 # HomeBack
 
-HomeBack is a fast replacement Home launcher for **rooted LG TVs running webOS 6+**. It gives you a compact app ribbon, a scrollable app drawer, quick access to Inputs, a numeric keypad with remote colour keys, and configurable short/long-press remote-button mappings.
+HomeBack is a fast replacement Home launcher for **rooted LG TVs running webOS 6+**. It gives you a compact app ribbon, a scrollable app drawer, quick access to Inputs, a numeric keypad with remote colour keys, configurable short/long-press remote-button mappings, and optional Home Assistant camera notifications.
 
 HomeBack is designed to feel like part of the TV rather than a separate launcher app:
 
@@ -9,6 +9,7 @@ HomeBack is designed to feel like part of the TV rather than a separate launcher
 - **App drawer** — browse installed apps with the remote D-pad or Magic Remote wheel
 - **Inputs tile** — open the LG input picker
 - **Keypad tile** — open HomeBack's compact pad; 0–9 and R/G/Y/B send the matching physical remote key presses
+- **Recent Cameras tile** — appears only while HomeBack has a fresh camera event URL
 - **Custom remote mappings** — launch apps, replace keys, ignore keys, run short/long actions, or execute commands
 
 HomeBack includes its own remote-input service, so you **should not run the standalone LG Input Hook app at the same time**.
@@ -29,17 +30,143 @@ The "Setting up HomeBack…" screen is intended for first-time setup only and sh
 
 ## Using the ribbon
 
-The built-in utility tiles are placed alongside your apps:
+The normal built-in utility tiles are:
 
 **Inputs → Keypad → Add apps**
 
+When a fresh camera event is available, **Cameras** is inserted before **Add apps**. The Cameras entry is intentionally a short-lived recent-event view, not a permanent camera directory.
+
 - **Inputs** opens the TV input picker.
 - **Keypad** opens a compact pad above the HomeBack tray. Each digit is sent immediately to the TV as the corresponding physical remote number key, so on Live TV it can be used for normal channel-number entry. A four-button **R / G / Y / B** row sits below `0` and sends the corresponding LG colour-key IDs. The in-app pad avoids webOS shifting the tray when the system virtual keyboard opens. Press **Back** to dismiss the keypad without leaving HomeBack.
+- **Cameras**, when present, opens the newest still-fresh camera event as the same bounded interactive preview used by direct HomeBack camera launches.
 - **Add apps** opens the app drawer so you can add or reorder apps on the ribbon.
 
 The ribbon auto-hides after about three seconds of inactivity during normal ribbon browsing. D-pad, wheel, and pointer activity reset the timer. Editing, the app drawer, and the numeric keypad pause auto-hide while you are actively using those modes; closing them resumes the normal three-second inactivity timer.
 
 Use the D-pad or Magic Remote wheel in the app drawer. HomeBack keeps drawer wheel scrolling separate from the ribbon's horizontal scrolling.
+
+## Home Assistant camera notifications
+
+HomeBack has two deliberately different camera-notification paths:
+
+- **Passive notification** — Home Assistant calls HomeBack's `/notification/createPreviewToast` service method. webOS shows a native **light** toast using HomeBack's packaged 80×80 icon. It does not take D-pad focus from the app you are watching.
+- **Interactive video/image preview** — Home Assistant explicitly launches `homeback:preview` with `interactive:true`. HomeBack shows its own **bright top-right** preview, intentionally owns remote input while it is visible, dismisses on **Back**, and enforces a hard maximum of 10 seconds.
+
+Passive notifications are suppressed for **5 seconds per camera ID** to collapse detector bursts. A suppressed event still refreshes the camera's newest media URL, so a burst of detections produces one toast while the Cameras tile points at the most recent event.
+
+### Test a passive notification from the TV shell
+
+Run this over SSH on the TV:
+
+```sh
+luna-send -n 1 -f \
+  -a com.homebrew.homeback.service \
+  luna://com.homebrew.homeback.service/notification/createPreviewToast \
+  '{
+    "cameraId":"camera.front_door",
+    "title":"Front Door",
+    "message":"Person detected",
+    "preview":{
+      "title":"Front Door",
+      "message":"Person detected",
+      "imageUrl":"http://HOME_ASSISTANT:8123/api/camera_proxy_stream/camera.front_door?token=CURRENT_TOKEN",
+      "durationMs":8000
+    }
+  }'
+```
+
+`preview.imageUrl` is optional for a text-only toast. When it is present, HomeBack keeps the newest URL for that camera as a **recent event** for up to two minutes. After that it is removed from the Cameras list rather than being presented as a reliable live-camera URL.
+
+Home Assistant camera-proxy tokens rotate and can become invalid sooner, for example after Home Assistant restarts. HomeBack therefore does **not** store camera credentials, refresh HA tokens, or promise that the recent-event URL remains valid for the whole two-minute convenience window. If a URL has already expired, the interactive preview reports **Camera unavailable**.
+
+### Test an explicit interactive preview
+
+```sh
+luna-send -n 1 -f \
+  -a com.homebrew.homeback.service \
+  luna://com.webos.service.applicationManager/launch \
+  '{
+    "id":"com.homebrew.homeback",
+    "params":{
+      "intent":"homeback:preview",
+      "preview":{
+        "interactive":true,
+        "title":"Front Door",
+        "message":"Person detected",
+        "imageUrl":"http://HOME_ASSISTANT:8123/api/camera_proxy_stream/camera.front_door?token=CURRENT_TOKEN",
+        "durationMs":8000
+      }
+    }
+  }'
+```
+
+The interactive card is always rendered with HomeBack's bright palette at the **top-right** of the screen. The native passive toast separately requests webOS `type: "light"`; HomeBack does not try to theme the rest of the TV UI.
+
+### Calling HomeBack from a Home Assistant automation
+
+Home Assistant's `shell_command` integration can call the TV over SSH. Store the HA SSH key under `/config/.ssh`; do not rely on `/root/.ssh` inside the Home Assistant container.
+
+A convenient way to avoid shell-quoting camera URLs and messages is to install this small decoder on the TV once:
+
+```sh
+cat >/home/root/homeback-camera-notify.sh <<'EOF'
+#!/bin/sh
+set -eu
+[ "$#" -eq 1 ] || exit 64
+payload="$(printf '%s' "$1" | base64 -d)"
+exec luna-send -n 1 -f \
+  -a com.homebrew.homeback.service \
+  luna://com.homebrew.homeback.service/notification/createPreviewToast \
+  "$payload"
+EOF
+chmod 700 /home/root/homeback-camera-notify.sh
+```
+
+Then add a shell command in Home Assistant. Replace the TV IP with your own:
+
+```yaml
+shell_command:
+  homeback_camera_event: >-
+    ssh -i /config/.ssh/id_ed25519
+    -o UserKnownHostsFile=/config/.ssh/known_hosts
+    root@192.168.1.50
+    /home/root/homeback-camera-notify.sh
+    {{ ({
+      "cameraId": camera_id,
+      "title": title,
+      "message": message,
+      "preview": {
+        "title": title,
+        "message": message,
+        "imageUrl": image_url,
+        "durationMs": duration_ms | default(8000)
+      }
+    } | to_json | base64_encode) }}
+```
+
+Home Assistant supports templated `shell_command` action data, `to_json`, and `base64_encode`. After adding or changing `shell_command`, reload that integration from **Settings → Tools → YAML**.
+
+An automation can then pass the current HA camera-proxy stream URL. For camera integrations exposing the current `access_token`, a local-network example is:
+
+```yaml
+automation:
+  - alias: "Front door to HomeBack"
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.front_door_person
+        to: "on"
+    actions:
+      - action: shell_command.homeback_camera_event
+        data:
+          camera_id: camera.front_door
+          title: Front Door
+          message: Person detected
+          image_url: >-
+            http://192.168.1.10:8123/api/camera_proxy_stream/camera.front_door?token={{ state_attr('camera.front_door', 'access_token') }}
+          duration_ms: 8000
+```
+
+Use an HA URL that the TV can actually reach. If your camera integration does not expose `access_token`, supply whatever current signed/proxied media URL your HA/Frigate automation already produces. Do not place a long-lived camera username/password in the HomeBack payload.
 
 ## Configuring remote buttons
 
@@ -185,9 +312,13 @@ A healthy HomeBack-owned setup normally reports:
 
 ```text
 started: true
+eventTailerHealthy: true
+timedMappingsArmed: true
 legacyInputHookDetected: false
 nativeOwnershipVerified: true
 ```
+
+`timedMappingsArmed` is intentionally fail-open: timed short/long mappings are only swallowed natively while the helper has a healthy retained event-log tailer and verified native ownership. If those conditions fail, HomeBack disarms the timed native `ignore` entries so the affected buttons pass through rather than becoming dead system-wide.
 
 `injected` shows the native processes HomeBack currently owns. A target may show `source: "injected"` when this service instance injected it, or `source: "adopted"` when HomeBack safely detected and resumed an already-loaded HomeBack hook after its helper restarted.
 
