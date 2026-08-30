@@ -313,8 +313,14 @@ requireInvariant(appManagerProvider.includes('this.iconQueue.length = 0'), 'stal
 const drawer = read('packages/app/src/features/ribbon/ui/ribbon-app-drawer/ribbon-app-drawer.component.tsx');
 requireInvariant(drawer.includes('{active && <RibbonAppDrawerList />}'), 'hidden app drawer list must not remain mounted at startup');
 const launcherService = read('packages/app/src/shared/services/launcher/model/launcher.service.ts');
+const launcherOrderPolicy = read('packages/app/src/shared/services/launcher/model/launcher-order.lib.ts');
 requireInvariant(launcherService.includes('providerErrorCount'), 'launcher provider failure status must be surfaced');
-requireInvariant(launcherService.includes('launchPoint.builtin') && launcherService.includes('nonBuiltinIds'), 'builtin IDs must be excluded from persisted user ordering');
+requireInvariant(launcherService.includes('launchPoint.builtin') && launcherOrderPolicy.includes('builtinIds'), 'builtin IDs must be excluded from persisted user ordering');
+requireInvariant(!launcherService.includes('validIds') && !launcherService.includes('const pruned'), 'launcher user ordering must not be pruned from transient provider snapshots');
+requireInvariant(
+	launcherService.includes('moveWithinPersistedOrder(') && launcherOrderPolicy.includes('export const moveWithinPersistedOrder'),
+	'launcher moves must preserve transiently missing persisted ids',
+);
 const ribbonComponent = read('packages/app/src/features/ribbon/ui/ribbon/ribbon.component.tsx');
 requireInvariant(ribbonComponent.includes('service.warningText'), 'user-visible remote/provider warning missing');
 requireInvariant(appPkg.name === '@homeback/app' && servicePkg.name === '@homeback/service' && utilsPkg.name === '@homeback/utils', 'HomeBack workspace package names regressed');

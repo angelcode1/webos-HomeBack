@@ -12,6 +12,10 @@ import type {
 	LaunchPointInput,
 	LaunchPointInstance,
 } from '../api/launch-point.interface';
+import {
+	moveWithinPersistedOrder,
+	sanitizePersistedOrder,
+} from './launcher-order.lib';
 import { LaunchPoint } from './launch-point.model';
 import type { LaunchPointsProvider } from '../providers';
 
@@ -53,21 +57,6 @@ export class LauncherService implements LaunchPointActions {
 			() => this.providers.flatMap(provider => provider.launchPoints),
 			snapshots => this.reconcileLaunchPoints(snapshots),
 			{ fireImmediately: true },
-		);
-
-		reaction(
-			() => ({
-				settled: this.fulfilled,
-				validIds: this.launchPoints.filter(lp => !lp.builtin).map(lp => lp.launchPointId),
-			}),
-			({ settled, validIds }) => {
-				if (!settled) return;
-				const valid = new Set(validIds);
-				const pruned = this.settingsService.order.filter(id => valid.has(id));
-				if (pruned.length !== this.settingsService.order.length) {
-					this.settingsService.order = pruned;
-				}
-			},
 		);
 	}
 
@@ -138,18 +127,16 @@ export class LauncherService implements LaunchPointActions {
 	}
 
 	public move(launchPoint: LaunchPointInstance, shift: number): void {
-		if (shift !== -1 && shift !== 1) return;
-
-		const ids = this.visible
+		const visibleIds = this.visible
 			.filter(item => !item.builtin)
 			.map(item => item.launchPointId);
-		const from = ids.indexOf(launchPoint.launchPointId);
-		const to = from + shift;
-		if (from < 0 || to < 0 || to >= ids.length) return;
-
-		ids.splice(from, 1);
-		ids.splice(to, 0, launchPoint.launchPointId);
-		this.order = ids;
+		const nextOrder = moveWithinPersistedOrder(
+			this.order,
+			visibleIds,
+			launchPoint.launchPointId,
+			shift,
+		);
+		if (nextOrder) this.order = nextOrder;
 	}
 
 	private get order(): string[] {
@@ -158,11 +145,7 @@ export class LauncherService implements LaunchPointActions {
 
 	private set order(value: string[]) {
 		if (!this.fulfilled) return;
-
-		const nonBuiltinIds = new Set(
-			this.launchPoints.filter(item => !item.builtin).map(item => item.launchPointId),
-		);
-		this.settingsService.order = [...new Set(value)].filter(id => nonBuiltinIds.has(id));
+		this.settingsService.order = sanitizePersistedOrder(value, this.launchPoints);
 	}
 
 	private reconcileLaunchPoints(snapshots: LaunchPointInput[]): void {
