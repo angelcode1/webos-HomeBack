@@ -29,15 +29,9 @@ export type PreviewNotificationRequest = {
 	};
 };
 
-export type NotificationToastBranding = {
-	sourceId: string;
-	iconUrl: string;
-};
-
 export type NotificationToastRequest = {
 	message: string;
 	sourceId: string;
-	iconUrl: string;
 	type: 'light';
 };
 
@@ -78,7 +72,7 @@ export const getPreviewNotificationKey = (request: PreviewNotificationRequest): 
 
 export const buildPreviewToastRequest = (
 	request: PreviewNotificationRequest,
-	branding: NotificationToastBranding,
+	sourceId: string,
 ): NotificationToastRequest => {
 	const title = displayText(request.title, TITLE_MAX_LENGTH);
 	const message = displayText(request.message, MESSAGE_MAX_LENGTH) ?? 'Camera event';
@@ -86,8 +80,9 @@ export const buildPreviewToastRequest = (
 
 	return {
 		message: combined.slice(0, TOAST_MESSAGE_MAX_LENGTH),
-		sourceId: branding.sourceId,
-		iconUrl: branding.iconUrl,
+		sourceId,
+		// On the tested webOS 10 TV, "light" selects the compact top-right toast
+		// form. It does not force a light colour theme; webOS owns toast styling.
 		type: 'light',
 	};
 };
