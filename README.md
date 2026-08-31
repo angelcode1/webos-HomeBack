@@ -1,6 +1,6 @@
 # HomeBack
 
-HomeBack is a fast replacement Home launcher for **rooted LG TVs running webOS 6+**. It gives you a compact app ribbon, a scrollable app drawer, quick access to Inputs, a numeric keypad with remote colour keys, configurable short/long-press remote-button mappings, and optional Home Assistant camera notifications.
+HomeBack is a fast replacement Home launcher for **rooted LG TVs running webOS 6+**. It gives you a compact app ribbon, a scrollable app drawer, quick access to Inputs, a numeric keypad with remote colour keys, configurable short/long-press remote-button mappings, and optional Home Assistant camera notifications **(Preview)**.
 
 HomeBack is designed to feel like part of the TV rather than a separate launcher app:
 
@@ -9,7 +9,7 @@ HomeBack is designed to feel like part of the TV rather than a separate launcher
 - **App drawer** — browse installed apps with the remote D-pad or Magic Remote wheel
 - **Inputs tile** — open the LG input picker
 - **Keypad tile** — open HomeBack's compact pad; 0–9 and R/G/Y/B send the matching physical remote key presses
-- **Recent Cameras tile** — appears only while HomeBack has a fresh camera event URL
+- **Recent Cameras tile (Preview)** — appears only while HomeBack has a fresh camera event URL
 - **Custom remote mappings** — launch apps, replace keys, ignore keys, run short/long actions, or execute commands
 
 HomeBack includes its own remote-input service, so you **should not run the standalone LG Input Hook app at the same time**.
@@ -45,16 +45,24 @@ The ribbon auto-hides after about three seconds of inactivity during normal ribb
 
 Use the D-pad or Magic Remote wheel in the app drawer. HomeBack keeps drawer wheel scrolling separate from the ribbon's horizontal scrolling.
 
-## Home Assistant camera notifications
+## Home Assistant camera notifications — Preview
 
-HomeBack has two deliberately different camera-notification paths:
+> **Preview validation scope:** the TV-side notification, Recent Cameras and interactive-preview architecture was hardware-validated on one **LG OLED42C5PSA.AAUQLJD** running **webOS SDK 10.0.0** and **firmware 33.00.71**. Those tests invoked HomeBack from a root TV shell with `luna-send`; an end-to-end Home Assistant detection event and production HA → TV transport have **not** yet been validated.
 
-- **Passive notification** — Home Assistant calls HomeBack's `/notification/createPreviewToast` service method. webOS shows its native compact top-right toast and keeps the app you are watching in control of the D-pad. On the tested webOS 10 TV, `type: "light"` selects this compact toast form; it does **not** force a light-coloured theme, and service-sourced toasts use the generic webOS information icon rather than HomeBack branding.
-- **Interactive video/image preview** — Home Assistant explicitly launches `homeback:preview` with `interactive:true`. HomeBack shows its own **bright top-right** preview, intentionally owns remote input while it is visible, dismisses on **Back**, and enforces a hard maximum of 10 seconds.
+HomeBack targets webOS 6+, but this validation cycle did not exercise older firmware. On webOS versions below 7.3 HomeBack uses the compositor `suspense` path rather than `webOSSystem.hide()` when hiding its surface; that older-version path remains untested on hardware.
+
+Native-toast behavior is also firmware-specific. On the tested TV/firmware, `type: "light"` selected the compact top-right toast, `standard` produced a bottom banner, and service-created toasts used generic webOS identity rather than HomeBack branding. Other webOS models or firmware may render native notifications differently.
+
+HomeBack has two deliberately different TV-side camera-notification paths:
+
+- **Passive notification** — an external integration calls HomeBack's `/notification/createPreviewToast` service method. webOS shows its native compact top-right toast and keeps the app you are watching in control of the D-pad on the tested webOS 10 TV.
+- **Interactive video/image preview** — an external integration explicitly launches `homeback:preview` with `interactive:true`. HomeBack shows its own **bright top-right** preview, intentionally owns remote input while it is visible, dismisses on **Back**, and enforces a hard maximum of 10 seconds.
 
 This is an intentional platform tradeoff: the native toast preserves underlying-app input but webOS controls its pixels, while the HomeBack interactive preview controls its appearance but owns input while visible.
 
 Passive notifications are suppressed for **5 seconds per camera ID** to collapse detector bursts. A suppressed event still refreshes the camera's newest media URL, so a burst of detections produces one toast while the Cameras tile points at the most recent event.
+
+The HA transport is intentionally unresolved. SSH is currently a reference path, while authenticated HTTP and MQTT remain design options. See [issue #22](https://github.com/angelcode1/webos-HomeBack/issues/22) before treating any transport as the settled integration architecture.
 
 ### Test a passive notification from the TV shell
 
@@ -71,7 +79,7 @@ luna-send -n 1 -f \
     "preview":{
       "title":"Front Door",
       "message":"Person detected",
-      "imageUrl":"http://HOME_ASSISTANT:8123/api/camera_proxy_stream/camera.front_door?token=CURRENT_TOKEN",
+      "imageUrl":"file:///media/developer/apps/usr/palm/applications/com.homebrew.homeback/icon130.png",
       "durationMs":8000
     }
   }'
@@ -79,7 +87,7 @@ luna-send -n 1 -f \
 
 `preview.imageUrl` is optional for a text-only toast. When it is present, HomeBack keeps the newest URL for that camera as a **recent event** for up to two minutes. After that it is removed from the Cameras list rather than being presented as a reliable live-camera URL.
 
-Home Assistant camera-proxy tokens rotate and can become invalid sooner, for example after Home Assistant restarts. HomeBack therefore does **not** store camera credentials, refresh HA tokens, or promise that the recent-event URL remains valid for the whole two-minute convenience window. If a URL has already expired, the interactive preview reports **Camera unavailable**.
+Real Home Assistant camera-proxy/signed URL lifetime has not yet been validated end to end. Such URLs can expire or be invalidated independently of HomeBack's two-minute convenience window. HomeBack therefore does **not** store camera credentials, refresh HA tokens, or promise that a recent-event URL remains usable for the full window. If a URL has already expired, the interactive preview reports **Camera unavailable**. See [issue #21](https://github.com/angelcode1/webos-HomeBack/issues/21) for the deferred HA token-lifetime validation.
 
 ### Test an explicit interactive preview
 
@@ -95,16 +103,18 @@ luna-send -n 1 -f \
         "interactive":true,
         "title":"Front Door",
         "message":"Person detected",
-        "imageUrl":"http://HOME_ASSISTANT:8123/api/camera_proxy_stream/camera.front_door?token=CURRENT_TOKEN",
+        "imageUrl":"file:///media/developer/apps/usr/palm/applications/com.homebrew.homeback/icon130.png",
         "durationMs":8000
       }
     }
   }'
 ```
 
-The interactive card is always rendered with HomeBack's bright palette at the **top-right** of the screen. The native passive toast separately uses webOS `type: "light"` only to select the compact toast form; webOS still owns its colours and system icon.
+The interactive card is always rendered with HomeBack's bright palette at the **top-right** of the screen. On the tested TV/firmware, the native passive toast separately uses webOS `type: "light"` to select the compact toast form; webOS still owns its colours and system icon.
 
-### Calling HomeBack from a Home Assistant automation
+### Reference Home Assistant automation over SSH — Preview / not end-to-end validated
+
+The following SSH route is a **reference integration**, not the settled production transport. The TV-local `luna-send` endpoint and UI behavior were hardware-validated, but this Home Assistant YAML has not yet been exercised from a real detection event. Transport selection is tracked in [issue #22](https://github.com/angelcode1/webos-HomeBack/issues/22).
 
 Home Assistant's `shell_command` integration can call the TV over SSH. Store the HA SSH key under `/config/.ssh`; do not rely on `/root/.ssh` inside the Home Assistant container.
 
@@ -168,7 +178,9 @@ automation:
           duration_ms: 8000
 ```
 
-Use an HA URL that the TV can actually reach. If your camera integration does not expose `access_token`, supply whatever current signed/proxied media URL your HA/Frigate automation already produces. Do not place a long-lived camera username/password in the HomeBack payload.
+If the TV is off or HomeBack is unavailable, camera events should be **dropped rather than queued or replayed later**. A future transport must preserve that behavior; stale detections appearing when the TV powers on are not useful notifications.
+
+Use an HA URL that the TV can actually reach. The notification path is HA → TV, while preview media is fetched in the opposite direction, TV → HA. Both network directions therefore need to work. If your camera integration does not expose `access_token`, supply whatever current signed/proxied media URL your HA/Frigate automation already produces. Do not place a long-lived camera username/password in the HomeBack payload.
 
 ## Configuring remote buttons
 
