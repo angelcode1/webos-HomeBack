@@ -11,7 +11,7 @@ const CAMERA_ID_MAX_LENGTH = 128;
 const TITLE_MAX_LENGTH = 96;
 const MESSAGE_MAX_LENGTH = 256;
 const TOAST_MESSAGE_MAX_LENGTH = 60;
-const TOAST_TITLE_MAX_CODEPOINTS = 24;
+const TOAST_TITLE_MAX_LENGTH = 24;
 const URL_MAX_LENGTH = 2_048;
 const PREVIEW_MIN_DURATION_MS = 1_000;
 const PREVIEW_DEFAULT_DURATION_MS = 8_000;
@@ -56,10 +56,14 @@ const displayText = (value: unknown, maxLength: number): string | null =>
 	normalizedString(value)?.slice(0, maxLength) ?? null;
 
 const truncateCodePoints = (value: string, maxLength: number): string => {
-	// One Unicode code point occupies at most two UTF-16 code units. Bound the
-	// intermediate string before Array.from() as well as the final code-point list.
-	const boundedCodeUnits = value.slice(0, maxLength * 2);
-	return Array.from(boundedCodeUnits).slice(0, maxLength).join('');
+	let result = '';
+
+	for (const point of value) {
+		if (result.length + point.length > maxLength) break;
+		result += point;
+	}
+
+	return result;
 };
 
 const boundedOpaqueString = (value: unknown, maxLength: number): string | null => {
@@ -82,10 +86,13 @@ export const buildPreviewToastRequest = (
 	request: PreviewNotificationRequest,
 	sourceId: string,
 ): NotificationToastRequest => {
-	// A toast has only 60 characters total. Keep camera/location context short so
-	// an unusually long friendly name cannot consume the event text entirely.
+	// webOS documents a 60-character toast limit without defining its Unicode
+	// counting semantics. Bound UTF-16 length conservatively while iterating by
+	// code point so truncation never splits a valid surrogate pair. Keep the title
+	// to 24 UTF-16 units so an unusually long friendly name cannot consume the
+	// event text entirely.
 	const rawTitle = displayText(request.title, TITLE_MAX_LENGTH);
-	const title = rawTitle ? truncateCodePoints(rawTitle, TOAST_TITLE_MAX_CODEPOINTS) : null;
+	const title = rawTitle ? truncateCodePoints(rawTitle, TOAST_TITLE_MAX_LENGTH) : null;
 	const message = displayText(request.message, MESSAGE_MAX_LENGTH) ?? 'Camera event';
 	const combined = title ? `${title}: ${message}` : message;
 

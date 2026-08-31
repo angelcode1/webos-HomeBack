@@ -37,13 +37,24 @@ test('toast title budget preserves event text when the friendly name is very lon
 	assert.equal(toast.message.startsWith('Front Door Driveway Dete: '), true);
 });
 
-test('toast truncation never splits a non-BMP character at the 60-code-point boundary', () => {
+test('toast truncation preserves a non-BMP character at the 60-code-unit boundary', () => {
 	const toast = buildPreviewToastRequest({
-		message: `${'a'.repeat(59)}😀suffix`,
+		message: `${'a'.repeat(58)}😀suffix`,
 	}, TEST_SERVICE_ID);
 
-	assert.equal(Array.from(toast.message).length, 60);
+	assert.equal(toast.message.length, 60);
+	assert.equal(Array.from(toast.message).length, 59);
 	assert.equal(toast.message.endsWith('😀'), true);
+	assert.equal(toast.message.isWellFormed(), true);
+});
+
+test('toast truncation bounds emoji-heavy messages to 60 UTF-16 code units', () => {
+	const toast = buildPreviewToastRequest({
+		message: '😀'.repeat(80),
+	}, TEST_SERVICE_ID);
+
+	assert.equal(toast.message.length, 60);
+	assert.equal(Array.from(toast.message).length, 30);
 	assert.equal(toast.message.isWellFormed(), true);
 });
 

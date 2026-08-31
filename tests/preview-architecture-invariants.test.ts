@@ -151,7 +151,7 @@ test('passive camera notifications use compact light-type toasts and queue-free 
 	assert.equal(notification.includes('PreviewNotificationState'), true);
 	assert.equal(notification.includes('releaseToastReservation'), true);
 	assert.equal(notification.includes('per-camera Promise queue'), true);
-	assert.equal(notification.includes('value.slice(0, maxLength * 2)'), true);
+	assert.equal(notification.includes('result.length + point.length > maxLength'), true);
 });
 
 test('Cameras stays behind an app-level coordinator and only appears with recent cameras', () => {
