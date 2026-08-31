@@ -133,3 +133,45 @@ test('requests without cameraId share the default key and still register newest 
 	assert.equal(camera.message, 'Detection 2');
 	assert.equal(camera.imageUrl, 'http://ha.local/camera?token=newest');
 });
+
+test('five concurrent same-camera requests reserve one toast and retain the newest camera event', async () => {
+	const state = new PreviewNotificationState();
+	let releaseFirstToast: (() => void) | null = null;
+	const firstToastPending = new Promise<void>(resolve => {
+		releaseFirstToast = resolve;
+	});
+	let senderCalls = 0;
+	const service = new PreviewNotificationService(
+		state,
+		TEST_SERVICE_ID,
+		async () => {
+			senderCalls += 1;
+			await firstToastPending;
+		},
+		buildPreviewToastRequest,
+	);
+	const requests = Array.from({ length: 5 }, (_, index) =>
+		testRequest({
+			message: `Detection ${index + 1}`,
+			preview: {
+				imageUrl: `http://ha.local/camera?token=${index + 1}`,
+				durationMs: 8_000,
+			},
+		}),
+	);
+
+	const pending = requests.map(request => service.createPreviewNotification(request));
+	await Promise.resolve();
+
+	assert.equal(senderCalls, 1);
+	assert.ok(releaseFirstToast);
+	releaseFirstToast();
+	const results = await Promise.all(pending);
+	const [camera] = state.listRecentCameras();
+
+	assert.equal(results.filter(result => !result.suppressed).length, 1);
+	assert.equal(results.filter(result => result.suppressed).length, 4);
+	assert.equal(camera.cameraId, 'camera.front_door');
+	assert.equal(camera.message, 'Detection 5');
+	assert.equal(camera.imageUrl, 'http://ha.local/camera?token=5');
+});
