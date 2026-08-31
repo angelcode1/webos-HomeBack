@@ -11,9 +11,8 @@ type KeyboardTarget = HTMLElement | Document;
 /**
  * Single remote-key dispatcher for the HomeBack surface.
  *
- * Exactly one owner (ribbon, drawer or keypad) receives semantic key events at
- * a time, avoiding capture-order dependencies between multiple document
- * listeners.
+ * Exactly one owner (keypad, drawer, ribbon or preview) receives semantic key
+ * events at a time, avoiding capture-order dependencies between listeners.
  */
 export class KeyboardService {
 	private ref: KeyboardTarget | null = null;

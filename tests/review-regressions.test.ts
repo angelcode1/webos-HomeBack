@@ -8,7 +8,7 @@ const read = (relativePath: string): string =>
 
 test('review hardening and cleanup remain applied', () => {
 	const launcher = read('packages/app/src/shared/services/launcher/model/launcher.service.ts');
-	const keyboard = read('packages/app/src/features/ribbon/services/keyboard/keyboard.service.ts');
+	const keyboard = read('packages/app/src/shared/services/keyboard/keyboard.service.ts');
 	const keypad = read('packages/app/src/features/ribbon/ui/numeric-keyboard-proxy/numeric-keyboard-proxy.component.tsx');
 	const ribbon = read('packages/app/src/features/ribbon/services/ribbon/ribbon.service.ts');
 	const settings = read('packages/app/src/shared/services/settings/model/settings.service.ts');

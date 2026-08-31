@@ -1,8 +1,16 @@
-import { Service } from './bus';
 import { readLaunchPointIcon, type IconRequest } from './app-catalog';
-import { APPLICATION_MANAGER_URI, APP_ID } from './environment';
 import { HomeBackBootstrap } from './bootstrap';
+import { Service } from './bus';
+import { APPLICATION_MANAGER_URI, APP_ID, SERVICE_ID } from './environment';
+import {
+	buildPreviewToastRequest,
+	PreviewNotificationState,
+	type PreviewNotificationRequest,
+} from './notification';
 import { getUid } from './utils';
+
+const NOTIFICATION_URI = 'luna://com.webos.notification';
+const previewNotificationState = new PreviewNotificationState();
 
 const service = new Service();
 const bootstrap = new HomeBackBootstrap(service);
@@ -53,6 +61,45 @@ service.registerSimple('/remote/start', async () => {
 service.registerSimple('/remote/status', () => ({
 	done: true,
 	status: bootstrap.remoteInput.status(),
+}));
+
+service.registerSimple<PreviewNotificationRequest>('/notification/createPreviewToast', async request => {
+	const normalizedRequest = request ?? {};
+	const prepared = previewNotificationState.prepare(normalizedRequest);
+
+	if (prepared.suppressed) {
+		return {
+			done: true,
+			suppressed: true,
+			cameraRegistered: Boolean(prepared.camera),
+		};
+	}
+
+	try {
+		await service.oneshot(
+			`${NOTIFICATION_URI}/createToast`,
+			buildPreviewToastRequest(normalizedRequest, SERVICE_ID),
+		);
+	} catch (error) {
+		if (prepared.reservedAt !== null) {
+			previewNotificationState.releaseToastReservation(
+				prepared.key,
+				prepared.reservedAt,
+			);
+		}
+		throw error;
+	}
+
+	return {
+		done: true,
+		suppressed: false,
+		cameraRegistered: Boolean(prepared.camera),
+	};
+});
+
+service.registerSimple('/cameras/list', () => ({
+	done: true,
+	cameras: previewNotificationState.listRecentCameras(),
 }));
 
 service.registerSimple('/restartService', () => {
