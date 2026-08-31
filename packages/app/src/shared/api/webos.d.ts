@@ -5,6 +5,7 @@ declare global {
 		onservicecallback(serializedMessage: string): void;
 
 		call(uri: string, serializedParameters: string): void;
+		cancel(): void;
 	}
 
 	namespace webOSSystem {
