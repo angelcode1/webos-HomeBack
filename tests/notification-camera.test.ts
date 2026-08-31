@@ -21,9 +21,30 @@ test('passive camera toast uses the compact webOS light type, service identity a
 	}, TEST_SERVICE_ID);
 
 	assert.equal(toast.type, 'light');
-	assert.equal(toast.message.length <= 60, true);
+	assert.equal(Array.from(toast.message).length <= 60, true);
 	assert.equal(toast.sourceId, TEST_SERVICE_ID);
 	assert.equal('iconUrl' in toast, false);
+});
+
+test('toast title budget preserves event text when the friendly name is very long', () => {
+	const toast = buildPreviewToastRequest({
+		title: 'Front Door Driveway Detection Zone With An Extremely Long Friendly Name',
+		message: 'Person detected in driveway',
+	}, TEST_SERVICE_ID);
+
+	assert.equal(Array.from(toast.message).length <= 60, true);
+	assert.match(toast.message, /Person detected in driveway/);
+	assert.equal(toast.message.startsWith('Front Door Driveway Dete: '), true);
+});
+
+test('toast truncation never splits a non-BMP character at the 60-code-point boundary', () => {
+	const toast = buildPreviewToastRequest({
+		message: `${'a'.repeat(59)}😀suffix`,
+	}, TEST_SERVICE_ID);
+
+	assert.equal(Array.from(toast.message).length, 60);
+	assert.equal(toast.message.endsWith('😀'), true);
+	assert.equal(toast.message.includes('\uFFFD'), false);
 });
 
 test('camera registry stores receipt time and expires recent-event URLs conservatively', () => {

@@ -11,6 +11,7 @@ const CAMERA_ID_MAX_LENGTH = 128;
 const TITLE_MAX_LENGTH = 96;
 const MESSAGE_MAX_LENGTH = 256;
 const TOAST_MESSAGE_MAX_LENGTH = 60;
+const TOAST_TITLE_MAX_CODEPOINTS = 24;
 const URL_MAX_LENGTH = 2_048;
 const PREVIEW_MIN_DURATION_MS = 1_000;
 const PREVIEW_DEFAULT_DURATION_MS = 8_000;
@@ -54,6 +55,9 @@ const normalizedString = (value: unknown): string | null => {
 const displayText = (value: unknown, maxLength: number): string | null =>
 	normalizedString(value)?.slice(0, maxLength) ?? null;
 
+const truncateCodePoints = (value: string, maxLength: number): string =>
+	Array.from(value).slice(0, maxLength).join('');
+
 const boundedOpaqueString = (value: unknown, maxLength: number): string | null => {
 	const normalized = normalizedString(value);
 	return normalized && normalized.length <= maxLength ? normalized : null;
@@ -74,12 +78,15 @@ export const buildPreviewToastRequest = (
 	request: PreviewNotificationRequest,
 	sourceId: string,
 ): NotificationToastRequest => {
-	const title = displayText(request.title, TITLE_MAX_LENGTH);
+	// A toast has only 60 characters total. Keep camera/location context short so
+	// an unusually long friendly name cannot consume the event text entirely.
+	const rawTitle = displayText(request.title, TITLE_MAX_LENGTH);
+	const title = rawTitle ? truncateCodePoints(rawTitle, TOAST_TITLE_MAX_CODEPOINTS) : null;
 	const message = displayText(request.message, MESSAGE_MAX_LENGTH) ?? 'Camera event';
 	const combined = title ? `${title}: ${message}` : message;
 
 	return {
-		message: combined.slice(0, TOAST_MESSAGE_MAX_LENGTH),
+		message: truncateCodePoints(combined, TOAST_MESSAGE_MAX_LENGTH),
 		sourceId,
 		// On the tested webOS 10 TV, "light" selects the compact top-right toast
 		// form. It does not force a light colour theme; webOS owns toast styling.
