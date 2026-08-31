@@ -49,7 +49,7 @@ Use the D-pad or Magic Remote wheel in the app drawer. HomeBack keeps drawer whe
 
 > **Preview validation scope:** the TV-side notification, Recent Cameras and interactive-preview architecture was hardware-validated on one **LG OLED42C5PSA.AAUQLJD** running **webOS SDK 10.0.0** and **firmware 33.00.71**. Those tests invoked HomeBack from a root TV shell with `luna-send`; an end-to-end Home Assistant detection event and production HA → TV transport have **not** yet been validated.
 
-HomeBack targets webOS 6+, but this validation cycle did not exercise older firmware. On webOS versions below 7.3 HomeBack uses the compositor `suspense` path rather than `webOSSystem.hide()` when hiding its surface; that older-version path remains untested on hardware.
+HomeBack targets webOS 6+, but this validation cycle did not exercise older firmware. When the reported SDK version is below 7.3, HomeBack uses the compositor `suspense` path rather than `webOSSystem.hide()` when hiding its surface; that older-version path remains untested on hardware.
 
 Native-toast behavior is also firmware-specific. On the tested TV/firmware, `type: "light"` selected the compact top-right toast, `standard` produced a bottom banner, and service-created toasts used generic webOS identity rather than HomeBack branding. Other webOS models or firmware may render native notifications differently.
 
