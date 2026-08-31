@@ -1,6 +1,7 @@
 import { makeAutoObservable, reaction, toJS } from 'mobx';
 
 import type { LunaRequestParams } from '../api/luna.api';
+import { LunaTopicRetryController, shouldRetryLunaTopic } from './luna-topic-retry.lib';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -17,18 +18,20 @@ export class LunaError extends Error {
 
 export class LunaTopic<T extends Record<string, any>, P extends LunaRequestParams = {}> {
 	public message: T | null = null;
-	private bridge!: PalmServiceBridge;
+	private bridge: PalmServiceBridge | null = null;
+	private readonly retryController: LunaTopicRetryController;
 
 	public constructor(
 		private readonly uri: string,
 		private readonly params?: P,
 	) {
-		makeAutoObservable<LunaTopic<T, P>, 'bridge' | 'uri' | 'params'>(
+		makeAutoObservable<LunaTopic<T, P>, 'bridge' | 'retryController' | 'uri' | 'params'>(
 			this,
-			{ bridge: false, uri: false, params: false },
+			{ bridge: false, retryController: false, uri: false, params: false },
 			{ autoBind: true },
 		);
 
+		this.retryController = new LunaTopicRetryController(this.subscribe);
 		this.subscribe();
 
 		if (__DEV__) {
@@ -38,17 +41,37 @@ export class LunaTopic<T extends Record<string, any>, P extends LunaRequestParam
 	}
 
 	private subscribe(): void {
-		this.bridge = new PalmServiceBridge();
-		this.bridge.onservicecallback = this.handleCallback;
-		this.bridge.call(this.uri, JSON.stringify({ ...this.params, subscribe: true }));
+		const bridge = new PalmServiceBridge();
+		this.bridge = bridge;
+		bridge.onservicecallback = this.handleCallback;
+		bridge.call(this.uri, JSON.stringify({ ...this.params, subscribe: true }));
 	}
 
 	private handleCallback(serialized: string): void {
+		let message: T;
 		try {
-			this.message = JSON.parse(serialized) as T;
+			message = JSON.parse(serialized) as T;
 		} catch (error) {
 			console.error(`Invalid Luna subscription response from ${this.uri}:`, error);
+			return;
 		}
+
+		this.message = message;
+		if (shouldRetryLunaTopic(message)) {
+			this.releaseBridge();
+			this.retryController.failed();
+			return;
+		}
+
+		this.retryController.succeeded();
+	}
+
+	private releaseBridge(): void {
+		const bridge = this.bridge;
+		if (!bridge) return;
+		bridge.onservicecallback = () => undefined;
+		bridge.cancel();
+		this.bridge = null;
 	}
 }
 
