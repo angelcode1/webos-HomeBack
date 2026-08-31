@@ -126,7 +126,7 @@ test('foreign app launches dismiss the focus-owning preview with all features', 
 	assert.equal(controller.includes('surfaceService.dismissFeatures()'), true);
 });
 
-test('passive camera notifications use light toasts and queue-free timestamp suppression', () => {
+test('passive camera notifications use compact light-type toasts and queue-free suppression', () => {
 	const service = readFileSync(
 		path.join(process.cwd(), 'packages/service/src/index.ts'),
 		'utf8',
@@ -140,12 +140,13 @@ test('passive camera notifications use light toasts and queue-free timestamp sup
 	assert.equal(service.includes('closeAlert'), false);
 	assert.equal(service.includes('runPreviewToastSerial'), false);
 	assert.equal(service.includes('previewToastQueues'), false);
-	assert.equal(service.includes('sourceId: SERVICE_ID'), true);
-	assert.equal(service.includes('/icon80.png`'), true);
-	assert.equal(service.includes('buildPreviewToastRequest(normalizedRequest, TOAST_BRANDING)'), true);
+	assert.equal(service.includes('buildPreviewToastRequest(normalizedRequest, SERVICE_ID)'), true);
+	assert.equal(service.includes('TOAST_BRANDING'), false);
+	assert.equal(service.includes('/icon80.png'), false);
 	assert.equal(notification.includes("type: 'light'"), true);
+	assert.equal(notification.includes('compact top-right toast'), true);
 	assert.equal(notification.includes('PREVIEW_TOAST_SUPPRESSION_MS = 5_000'), true);
-	assert.equal(notification.includes('iconUrl?: string'), false);
+	assert.equal(notification.includes('iconUrl'), false);
 	assert.equal(notification.includes("from './environment'"), false);
 	assert.equal(notification.includes('PreviewNotificationState'), true);
 	assert.equal(notification.includes('releaseToastReservation'), true);
