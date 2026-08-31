@@ -53,10 +53,16 @@ class AppController {
 	private readonly openCameras = async (): Promise<void> => {
 		await cameraService.refresh();
 		const camera = cameraService.cameras[0];
-		if (!camera) return;
+		if (!camera) {
+			console.warn('[HomeBackCamera] no recent camera');
+			return;
+		}
 
+		const payload = cameraToPreviewPayload(camera);
+		// Keep the shared surface continuously requested during the ribbon ->
+		// preview handoff. Showing first avoids scheduling an unnecessary hide.
+		previewService.show(payload);
 		ribbonService.hide();
-		previewService.show(cameraToPreviewPayload(camera));
 	};
 }
 

@@ -55,8 +55,12 @@ const normalizedString = (value: unknown): string | null => {
 const displayText = (value: unknown, maxLength: number): string | null =>
 	normalizedString(value)?.slice(0, maxLength) ?? null;
 
-const truncateCodePoints = (value: string, maxLength: number): string =>
-	Array.from(value).slice(0, maxLength).join('');
+const truncateCodePoints = (value: string, maxLength: number): string => {
+	// One Unicode code point occupies at most two UTF-16 code units. Bound the
+	// intermediate string before Array.from() as well as the final code-point list.
+	const boundedCodeUnits = value.slice(0, maxLength * 2);
+	return Array.from(boundedCodeUnits).slice(0, maxLength).join('');
+};
 
 const boundedOpaqueString = (value: unknown, maxLength: number): string | null => {
 	const normalized = normalizedString(value);

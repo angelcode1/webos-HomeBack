@@ -151,6 +151,7 @@ test('passive camera notifications use compact light-type toasts and queue-free 
 	assert.equal(notification.includes('PreviewNotificationState'), true);
 	assert.equal(notification.includes('releaseToastReservation'), true);
 	assert.equal(notification.includes('per-camera Promise queue'), true);
+	assert.equal(notification.includes('value.slice(0, maxLength * 2)'), true);
 });
 
 test('Cameras stays behind an app-level coordinator and only appears with recent cameras', () => {
@@ -174,7 +175,12 @@ test('Cameras stays behind an app-level coordinator and only appears with recent
 	assert.equal(launcher.includes('features/preview'), false);
 	assert.equal(controller.includes("emitter.on('openCameras', this.openCameras)"), true);
 	assert.equal(controller.includes('cameraToPreviewPayload(camera)'), true);
-	assert.equal(controller.includes('previewService.show('), true);
+	assert.equal(controller.includes("console.warn('[HomeBackCamera] no recent camera')"), true);
+	const previewShow = controller.indexOf('previewService.show(payload);');
+	const ribbonHide = controller.indexOf('ribbonService.hide();');
+	assert.notEqual(previewShow, -1);
+	assert.notEqual(ribbonHide, -1);
+	assert.equal(previewShow < ribbonHide, true);
 	assert.equal(notification.includes('receivedAt: number'), true);
 	assert.equal(notification.includes('expiresAt: number'), true);
 	assert.equal(notification.includes('RECENT_CAMERA_FRESHNESS_MS = 2 * 60_000'), true);

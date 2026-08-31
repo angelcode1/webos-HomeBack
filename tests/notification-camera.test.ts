@@ -44,7 +44,7 @@ test('toast truncation never splits a non-BMP character at the 60-code-point bou
 
 	assert.equal(Array.from(toast.message).length, 60);
 	assert.equal(toast.message.endsWith('😀'), true);
-	assert.equal(toast.message.includes('\uFFFD'), false);
+	assert.equal(toast.message.isWellFormed(), true);
 });
 
 test('camera registry stores receipt time and expires recent-event URLs conservatively', () => {
