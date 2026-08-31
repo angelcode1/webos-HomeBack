@@ -91,7 +91,7 @@ test('HTTP config and source rules stay bounded to explicit IPv4/CIDR inputs', (
 	assert.equal(bearerTokenMatches('Bearer wrong-token', 'same-token'), false);
 });
 
-test('HTTP transport is disabled by default and does not create a token', async () => {
+test('HTTP status distinguishes config loading from a loaded disabled config', async () => {
 	const dir = await mkdtemp(join(tmpdir(), 'homeback-http-disabled-'));
 	const configPath = join(dir, 'http.json');
 	const tokenPath = join(dir, 'api-token');
@@ -103,8 +103,19 @@ test('HTTP transport is disabled by default and does not create a token', async 
 		createPreviewNotification: async () => ({ done: true, suppressed: false, cameraRegistered: true }),
 	});
 
-	await server.start();
+	const startPromise = server.start();
 	assert.deepEqual(server.status(), {
+		httpConfigLoaded: false,
+		httpEnabled: false,
+		httpListening: false,
+		httpPort: 9876,
+		httpConfigPath: configPath,
+		httpFailureReason: null,
+	});
+
+	await startPromise;
+	assert.deepEqual(server.status(), {
+		httpConfigLoaded: true,
 		httpEnabled: false,
 		httpListening: false,
 		httpPort: 9876,
@@ -113,6 +124,27 @@ test('HTTP transport is disabled by default and does not create a token', async 
 	});
 	const config = JSON.parse(await readFile(configPath, 'utf8')) as { http: { enabled: boolean } };
 	assert.equal(config.http.enabled, false);
+	await assert.rejects(readFile(tokenPath, 'utf8'), { code: 'ENOENT' });
+});
+
+test('invalid HTTP config remains distinguishable from a loaded config', async () => {
+	const dir = await mkdtemp(join(tmpdir(), 'homeback-http-invalid-'));
+	const configPath = join(dir, 'http.json');
+	const tokenPath = join(dir, 'api-token');
+	await writeFile(configPath, '{"http":{"enabled":"yes"}}\n', { mode: 0o600 });
+	const server = new HttpPreviewServer({
+		version: 'test',
+		configPath,
+		tokenPath,
+		bindAddress: '127.0.0.1',
+		createPreviewNotification: async () => ({ done: true, suppressed: false, cameraRegistered: true }),
+	});
+
+	await server.start();
+	assert.equal(server.status().httpConfigLoaded, false);
+	assert.equal(server.status().httpEnabled, false);
+	assert.equal(server.status().httpListening, false);
+	assert.equal(server.status().httpFailureReason, 'config-error');
 	await assert.rejects(readFile(tokenPath, 'utf8'), { code: 'ENOENT' });
 });
 
@@ -140,6 +172,7 @@ test('enabled listener creates a 0600 token only after binding and authenticates
 	const status = await request(port, { path: '/status', token });
 	assert.equal(status.statusCode, 200);
 	assert.deepEqual(JSON.parse(status.body), { ok: true, version: '0.5.0-test' });
+	assert.equal(server.status().httpConfigLoaded, true);
 	assert.equal(server.status().httpListening, true);
 	await server.stop();
 	assert.equal(server.status().httpListening, false);
@@ -206,6 +239,7 @@ test('bind failure is fail-open and does not persist a newly generated token', a
 	});
 
 	await server.start();
+	assert.equal(server.status().httpConfigLoaded, true);
 	assert.equal(server.status().httpListening, false);
 	assert.equal(server.status().httpFailureReason, 'EADDRINUSE');
 	await assert.rejects(readFile(tokenPath, 'utf8'), { code: 'ENOENT' });

@@ -49,8 +49,17 @@ if (!Number.isInteger(configuredTimeout) || configuredTimeout < PROBE_INTERVAL_M
   process.exit(64);
 }
 const probeTimeoutMs = configuredTimeout;
+const socketIdleMs =
+  probeTimeoutMs >= PROBE_INTERVAL_MS * 2
+    ? probeTimeoutMs - PROBE_INTERVAL_MS
+    : null;
+const maxInFlight = Math.max(
+  1,
+  Math.ceil(probeTimeoutMs / PROBE_INTERVAL_MS),
+);
 
 let sequence = 0;
+let inFlight = 0;
 let timer = null;
 let input = null;
 let stopped = false;
@@ -69,14 +78,19 @@ const probe = () => {
 
   return new Promise(resolve => {
     let settled = false;
+    let connected = false;
+    let deadline = null;
+
     const finish = result => {
       if (settled) return;
       settled = true;
+      if (deadline !== null) clearTimeout(deadline);
       resolve({
         id,
         startedAt,
         endedAt: Date.now(),
         latencyMs: elapsedMs(startedMono),
+        connected,
         ...result,
       });
     };
@@ -100,11 +114,30 @@ const probe = () => {
       },
     );
 
-    request.setTimeout(probeTimeoutMs, () => {
-      const error = new Error('HomeBack status probe timed out.');
-      error.code = 'ETIMEDOUT';
-      request.destroy(error);
+    request.once('socket', socket => {
+      if (socket.connecting) {
+        socket.once('connect', () => {
+          connected = true;
+        });
+      } else {
+        connected = true;
+      }
     });
+
+    deadline = setTimeout(() => {
+      const error = new Error('HomeBack probe exceeded its absolute deadline.');
+      error.code = 'EPROBEDEADLINE';
+      request.destroy(error);
+    }, probeTimeoutMs);
+
+    if (socketIdleMs !== null) {
+      request.setTimeout(socketIdleMs, () => {
+        const error = new Error('Connected HomeBack probe became inactive.');
+        error.code = 'ESOCKETTIMEDOUT';
+        request.destroy(error);
+      });
+    }
+
     request.once('error', error => {
       const mode = typeof error.code === 'string' ? error.code : error.name || 'ERROR';
       finish({ ready: false, mode });
@@ -122,6 +155,7 @@ const printProbe = result => {
       result.ready ? 'ready' : 'unavailable',
       result.mode,
       result.latencyMs.toFixed(1),
+      `connected=${result.connected ? 'true' : 'false'}`,
     ].join(','),
   );
 };
@@ -141,6 +175,7 @@ const printSummaryAndStop = () => {
   console.log('summary');
   console.log(`standby_failure_mode=${firstStandbyFailure.mode}`);
   console.log(`standby_probe_latency_ms=${firstStandbyFailure.latencyMs.toFixed(1)}`);
+  console.log(`standby_failure_connected=${firstStandbyFailure.connected ? 'true' : 'false'}`);
   console.log(`standby_detection_ms=${firstStandbyFailure.endedAt - standbyMarkedAt}`);
   console.log(`wake_to_http_ready_ms=${firstWakeSuccess.endedAt - wakeMarkedAt}`);
   stop(0);
@@ -175,7 +210,17 @@ const handleResult = result => {
 };
 
 const launchProbe = () => {
-  void probe().then(handleResult);
+  if (inFlight >= maxInFlight) {
+    console.log(`probe_skipped,inflight_limit,${inFlight}`);
+    return;
+  }
+
+  inFlight += 1;
+  void probe()
+    .then(handleResult)
+    .finally(() => {
+      inFlight -= 1;
+    });
 };
 
 const startMeasurement = async () => {
@@ -192,6 +237,8 @@ const startMeasurement = async () => {
 
   console.log(`probe_interval_ms=${PROBE_INTERVAL_MS}`);
   console.log(`probe_timeout_ms=${probeTimeoutMs}`);
+  console.log(`probe_socket_idle_ms=${socketIdleMs ?? 'disabled'}`);
+  console.log(`probe_max_in_flight=${maxInFlight}`);
   console.log('Press Enter at the moment you send the TV into standby.');
 
   input = readline.createInterface({ input: process.stdin, output: process.stdout });

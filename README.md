@@ -34,7 +34,7 @@ The normal built-in utility tiles are:
 
 **Inputs → Keypad → Add apps**
 
-When a fresh camera event is available, **Cameras** is inserted before **Add apps**. The Cameras entry is intentionally a short-lived recent-event view, not a permanent camera directory.
+When a fresh camera event is available, **Cameras** is inserted before **Add apps**. The Cameras entry is intentionally a short-lived recent-event view, not a permanent camera directory. Recent Cameras is volatile in-memory state: a HomeBack service/system restart clears it rather than persisting camera-event URLs across reboot.
 
 - **Inputs** opens the TV input picker.
 - **Keypad** opens a compact pad above the HomeBack tray. Each digit is sent immediately to the TV as the corresponding physical remote number key, so on Live TV it can be used for normal channel-number entry. A four-button **R / G / Y / B** row sits below `0` and sends the corresponding LG colour-key IDs. The in-app pad avoids webOS shifting the tray when the system virtual keyboard opens. Press **Back** to dismiss the keypad without leaving HomeBack.
@@ -47,7 +47,7 @@ Use the D-pad or Magic Remote wheel in the app drawer. HomeBack keeps drawer whe
 
 ## Home Assistant camera notifications — Preview
 
-> **Preview validation scope:** the TV-side notification, Recent Cameras and interactive-preview architecture was hardware-validated on one **LG OLED42C5PSA.AAUQLJD** running **webOS SDK 10.0.0** and **firmware 33.00.71**. Those tests invoked HomeBack from a root TV shell with `luna-send`. The authenticated HTTP transport described below is implemented and CI-tested, but its listener lifecycle, standby/wake behavior and end-to-end Home Assistant path have **not** yet been hardware-validated on that TV.
+> **Preview validation scope:** the TV-side notification, Recent Cameras and interactive-preview architecture was hardware-validated on one **LG OLED42C5PSA.AAUQLJD** running **webOS SDK 10.0.0** and **firmware 33.00.71**. The opt-in authenticated HTTP listener was also validated on that TV for enable/restart/token handling and repeated standby/reboot recovery. A real Home Assistant `rest_command` notification/media path remains **open** until the HA-side gates below are run.
 
 HomeBack targets webOS 6+, but this validation cycle did not exercise older firmware. When the reported SDK version is below 7.3, HomeBack uses the compositor `suspense` path rather than `webOSSystem.hide()` when hiding its surface; that older-version path remains untested on hardware.
 
@@ -70,11 +70,11 @@ The HTTP listener is plain HTTP with bearer authentication. Treat it as a **trus
 
 The enable order matters because HomeBack does not create a bearer token until the listener has successfully bound its port:
 
-1. **Confirm the default disabled state.** After the HomeBack service has started once, `/home/root/.config/homeback/http.json` is created with `enabled: false`. `/remote/status` should report `httpEnabled: false` and `httpListening: false`. On a fresh setup no API token is created while HTTP remains disabled; disabling a listener that was enabled previously does not itself delete the existing token.
+1. **Confirm the default disabled state after configuration has loaded.** `/remote/status` should report `httpConfigLoaded: true`, `httpEnabled: false` and `httpListening: false`. A fresh config is `/home/root/.config/homeback/http.json` with `enabled: false`; no API token is created while HTTP has never been enabled. Disabling a listener that was enabled previously does not itself delete the existing token. On the measured C5, a fresh **manual candidate-IPK install** required one HomeBack app launch before root-helper initialisation and default HTTP-config creation had completed; that exact bootstrap sequence is scoped to the measured manual-install path.
 2. **Edit the HTTP config.** Set `enabled` to `true`, keep or change port `9876`, and preferably pin `allowedSources` to the Home Assistant host's IPv4 address.
 3. **Restart the HomeBack service.** The listener is service-owned; restarting only the HomeBack UI app is not the enable action.
-4. **Check `/remote/status`.** A successful bind should report `httpEnabled: true`, `httpListening: true`, the configured `httpPort`, and `httpFailureReason: null`.
-5. **Only after that successful bind, read the token** from `/home/root/.config/homeback/api-token`. If the file does not exist, do not invent one: check `httpFailureReason` and the configured port/source settings first.
+4. **Check `/remote/status`.** A successful config load/bind should report `httpConfigLoaded: true`, `httpEnabled: true`, `httpListening: true`, the configured `httpPort`, and `httpFailureReason: null`.
+5. **Only after that successful bind, read the token** from `/home/root/.config/homeback/api-token`. If the file does not exist, do not invent one: check `httpConfigLoaded`, `httpFailureReason` and the configured port/source settings first.
 6. **Store the full Authorization value in Home Assistant `secrets.yaml`**, then configure `rest_command` as shown below.
 
 Recommended config when Home Assistant is `192.168.1.10`:
@@ -107,11 +107,14 @@ luna-send -n 1 -f \
 Expected HTTP fields after a successful enable are equivalent to:
 
 ```text
+httpConfigLoaded: true
 httpEnabled: true
 httpListening: true
 httpPort: 9876
 httpFailureReason: null
 ```
+
+`httpConfigLoaded: false` means the current service instance has not yet completed a valid HTTP-config load (or that config loading failed). It prevents the startup window from being mistaken for a deliberately disabled listener.
 
 Then retrieve the generated token over the trusted root shell:
 
@@ -159,7 +162,7 @@ rest_command:
 
 Every interpolated JSON value is serialized with Jinja `| tojson`; do not hand-quote camera names, messages or signed URLs. Quotes, backslashes, Unicode and other camera metadata must remain valid JSON.
 
-Home Assistant's REST command timeout is configurable. Do not claim an optimized timeout for the C5 until the standby/wake measurement below has been run: the important distinction is whether a sleeping TV fails quickly (for example `ECONNREFUSED`) or silently consumes the request timeout. The current Home Assistant default can be left in place during validation, then an explicit `timeout:` can be chosen from measured behavior.
+C5 standby testing does **not** justify a universal Home Assistant `rest_command timeout:` recommendation. The measured listener remains reachable for about 119-120 seconds after standby begins, then the TV reboots; after a manual wake, authenticated HTTP returned about 53-55 seconds later in the two corrected runs. Changing an HA request timeout does not turn that wake path into a useful real-time camera notification path.
 
 An automation can call the HTTP command with the current media URL:
 
@@ -181,13 +184,15 @@ automation:
           duration_ms: 8000
 ```
 
-If the TV is off or HomeBack is unavailable, the request is intended to **fail and be dropped**, not queue for replay at power-on. HomeBack does not implement a backlog.
+HomeBack camera notifications are for a TV that is **already on**. If the TV is deeply off or HomeBack is unavailable, the request is intended to fail and be dropped, not queue for replay at power-on. Waking the tested C5 and then waiting roughly 53-55 seconds for authenticated HTTP is not a viable doorbell-notification workaround; replaying the event that late would be stale.
+
+There is one standby edge case to understand. On the tested C5 the listener remains reachable for a highly repeatable roughly-120-second grace period before the deep reboot. A request accepted during that window can return HTTP 200 with `cameraRegistered: true`, but the Recent Cameras registry is in-memory only and the subsequent reboot clears it. **HTTP 200 means HomeBack accepted the event while reachable; it does not prove that a person saw the toast and it does not make the event durable.**
 
 Use an HA URL that the TV can actually reach. Notification delivery is HA → TV, while preview media is fetched in the opposite direction, TV → HA. Both network directions therefore need to work. If your camera integration does not expose `access_token`, supply whatever current signed/proxied media URL your HA/Frigate automation already produces. Do not place a long-lived camera username/password in the HomeBack payload.
 
-Real Home Assistant camera-proxy/signed URL lifetime has not yet been validated end to end. Such URLs can expire or be invalidated independently of HomeBack's two-minute convenience window. HomeBack therefore does **not** store camera credentials, refresh HA tokens, or promise that a recent-event URL remains usable for the full window. If a URL has already expired, the interactive preview reports **Camera unavailable**. See [issue #21](https://github.com/angelcode1/webos-HomeBack/issues/21) for the deferred HA token-lifetime validation.
+Real Home Assistant camera-proxy/signed URL lifetime has not yet been validated end to end. Such URLs can expire or be invalidated independently of HomeBack's two-minute convenience window. HomeBack therefore does **not** store camera credentials, refresh HA tokens, persist Recent Cameras across reboot, or promise that a recent-event URL remains usable for the full window. If a URL has already expired, the interactive preview reports **Camera unavailable**. See [issue #21](https://github.com/angelcode1/webos-HomeBack/issues/21) for the deferred HA token-lifetime validation.
 
-### Measure standby/wake behavior before tuning HA timeouts
+### Measured standby/wake behavior on the tested C5
 
 Use the repository probe rather than hand-timing the listener:
 
@@ -196,9 +201,17 @@ HOMEBACK_TOKEN="$(ssh root@TV-IP cat /home/root/.config/homeback/api-token)" \
   node scripts/measure-http-preview-standby.cjs http://TV-IP:9876
 ```
 
-The probe makes an authenticated `/status` request every 500 ms and reports the first standby failure mode, the failed request's latency, standby detection time, and wake-to-first-HTTP-200 time. It does not print the bearer token. Run it from the HA host when possible; otherwise the measurement host must itself be permitted by `allowedSources`.
+The corrected probe makes an authenticated `/status` request every 500 ms, applies a true 2000 ms whole-request deadline by default, records a separate connected-socket inactivity result and `connected=true|false`, and caps concurrent probes. It does not print the bearer token.
 
-The full C5 validation procedure, output interpretation, service-restart/app-restart gates and TV → HA media checks are in [HTTP-PREVIEW-VALIDATION.md](./HTTP-PREVIEW-VALIDATION.md). Do not turn these measurements into general webOS claims; the current hardware baseline is the single C5/firmware identified above.
+Two corrected runs on the named C5/firmware reproduced:
+
+- standby → network unavailable: `>119.297 s` / `<=119.787 s`, then `>119.172 s` / `<=119.655 s`;
+- wake → HTTP-ready observation window: `>54.328 s` / `<=54.830 s`, then `>53.180 s` / `<=53.682 s`;
+- first completed authenticated HTTP 200 after wake: `54.877 s` and `53.711 s`.
+
+The standby windows overlap and are consistent with a fixed approximately-120-second timer on this tested C5/firmware; do not generalise that into a webOS-wide constant. `/proc/uptime` proved the deep transition includes a kernel/system reboot. The TV wall clock was stable within each boot but stepped across reboots, so per-boot clock calibration is useful while cross-boot wall-clock correlation is not.
+
+The full evidence, probe interpretation, boot-relative timings, service-restart/app-restart gates, grace-window no-replay test and TV → HA media checks are in [HTTP-PREVIEW-VALIDATION.md](./HTTP-PREVIEW-VALIDATION.md).
 
 ### Test the TV-side Luna path directly
 
@@ -221,7 +234,7 @@ luna-send -n 1 -f \
   }'
 ```
 
-`preview.imageUrl` is optional for a text-only toast. When it is present, HomeBack keeps the newest URL for that camera as a **recent event** for up to two minutes. After that it is removed from the Cameras list rather than being presented as a reliable live-camera URL.
+`preview.imageUrl` is optional for a text-only toast. When it is present, HomeBack keeps the newest URL for that camera as a **recent event** for up to two minutes. After that it is removed from the Cameras list rather than being presented as a reliable live-camera URL. The registry is intentionally volatile and is cleared by a HomeBack service/system restart rather than persisting potentially expired signed media URLs across reboot.
 
 ### Test an explicit interactive preview
 

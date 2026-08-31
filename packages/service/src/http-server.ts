@@ -28,6 +28,7 @@ type HttpPreviewConfigFile = {
 };
 
 export type HttpPreviewServerStatus = {
+	httpConfigLoaded: boolean;
 	httpEnabled: boolean;
 	httpListening: boolean;
 	httpPort: number;
@@ -269,6 +270,7 @@ export class HttpPreviewServer {
 	private server: Server | null = null;
 	private startPromise: Promise<void> | null = null;
 	private ready = false;
+	private configLoaded = false;
 	private enabled = false;
 	private listening = false;
 	private port = DEFAULT_HTTP_PORT;
@@ -306,6 +308,7 @@ export class HttpPreviewServer {
 
 	public status(): HttpPreviewServerStatus {
 		return {
+			httpConfigLoaded: this.configLoaded,
 			httpEnabled: this.enabled,
 			httpListening: this.listening,
 			httpPort: this.port,
@@ -315,6 +318,7 @@ export class HttpPreviewServer {
 	}
 
 	private async startOnce(): Promise<void> {
+		this.configLoaded = false;
 		this.failureReason = null;
 		let config: HttpPreviewConfig;
 		try {
@@ -324,6 +328,7 @@ export class HttpPreviewServer {
 			return;
 		}
 
+		this.configLoaded = true;
 		this.enabled = config.enabled;
 		this.port = config.port;
 		if (!config.enabled) return;

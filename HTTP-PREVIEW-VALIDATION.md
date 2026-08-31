@@ -1,8 +1,8 @@
 # HTTP Preview transport validation
 
-This document is the hardware-validation procedure for HomeBack's opt-in authenticated HTTP transport for Preview camera notifications.
+This document is the hardware-validation procedure and current measured baseline for HomeBack's opt-in authenticated HTTP transport for Preview camera notifications.
 
-It does **not** turn CI coverage into a hardware claim. The existing camera surface/notification behavior was validated on one LG OLED42C5PSA.AAUQLJD running webOS SDK 10.0.0 / firmware 33.00.71. The HTTP listener implementation is CI-tested, but the C5 listener lifecycle, standby/wake behavior and real Home Assistant path remain open until the measurements below are recorded.
+It does **not** turn single-device evidence into a general webOS claim. The existing camera surface/notification behavior and the HTTP listener lifecycle below were validated on one LG OLED42C5PSA.AAUQLJD running webOS SDK 10.0.0 / firmware 33.00.71. The real Home Assistant notification/media path still has open gates.
 
 Issue [#22](https://github.com/angelcode1/webos-HomeBack/issues/22) tracks this transport. Issue [#21](https://github.com/angelcode1/webos-HomeBack/issues/21) separately tracks real Home Assistant signed/proxied media URL lifetime.
 
@@ -12,10 +12,12 @@ Before measuring:
 
 1. Install the candidate build on the TV.
 2. Enable HTTP in `/home/root/.config/homeback/http.json` as documented in the README.
-3. Prefer an exact Home Assistant IPv4 address in `allowedSources`. If the measurement machine is different, either run the probe from the HA host or temporarily add the measurement host explicitly.
-4. Confirm the service reports `httpEnabled: true`, `httpListening: true`, the expected port and `httpFailureReason: null`.
+3. Prefer an exact Home Assistant IPv4 address in `allowedSources`. If the measurement machine is different, either run the probe from the HA host or temporarily use `allowedSources: []`, which permits authenticated RFC1918 IPv4 clients, and record that broader validation boundary.
+4. Confirm `/remote/status` reports `httpConfigLoaded: true`, `httpEnabled: true`, `httpListening: true`, the expected port and `httpFailureReason: null`.
 5. Confirm authenticated `GET /status` returns HTTP 200 from the intended client network.
 6. Record the exact TV model, SDK version, firmware version, candidate commit SHA and Home Assistant version before interpreting results.
+
+On the measured C5, a fresh **manual candidate-IPK install** required one HomeBack app launch before root-helper initialisation and default HTTP-config creation had completed. Do not generalise that exact bootstrap sequence beyond the measured manual-install path.
 
 Do not put the bearer token in issue comments, CI logs, screenshots or validation transcripts.
 
@@ -27,12 +29,14 @@ From an allowed LAN client, call authenticated `GET /status` immediately after t
 
 PASS requires:
 
-- the TCP/HTTP listener becomes reachable;
+- `/remote/status` first distinguishes configuration that has not loaded yet with `httpConfigLoaded: false`;
+- after a valid config loads, `httpConfigLoaded: true` is reported even when HTTP is intentionally disabled;
+- when enabled, the TCP/HTTP listener becomes reachable;
 - authenticated `/status` returns HTTP 200;
 - `/remote/status` reports `httpEnabled: true` and `httpListening: true`;
 - remote input remains healthy independently of HTTP state.
 
-Record listener-ready latency if service activation time can be timestamped reliably.
+This explicit config-loaded field exists because C5 hardware testing reproduced a transient restart window in which the old fields alone looked exactly like a successfully loaded disabled configuration.
 
 ### 2. Service restart restores the listener
 
@@ -45,6 +49,8 @@ luna-send -n 1 -f \
 ```
 
 Probe `/status` continuously across the restart. PASS requires the old listener to disappear and a new authenticated HTTP 200 to return after service activation without changing the token or config.
+
+On the measured C5, an ordinary service restart also exercised HomeBack's existing-hook adoption path (`source: "adopted"`). That path starts the event log at EOF to avoid replaying stale pre-restart input events. Treat this as evidence that the adoption branch was taken, not as a claim that stale input was independently induced and measured.
 
 ### 3. App-only restart does not own the listener
 
@@ -65,6 +71,7 @@ Occupy the configured port or otherwise reproduce a bounded listener-start failu
 PASS requires:
 
 - HomeBack's critical remote-input service remains running;
+- a valid config remains identifiable with `httpConfigLoaded: true`;
 - `/remote/status` reports `httpListening: false` with a bounded `httpFailureReason`;
 - no unhandled server error terminates the service;
 - a first-enable bind failure does not create a new token file.
@@ -82,40 +89,74 @@ HOMEBACK_TOKEN="$(ssh root@TV-IP cat /home/root/.config/homeback/api-token)" \
   node scripts/measure-http-preview-standby.cjs http://TV-IP:9876
 ```
 
-The script:
+The corrected script:
 
 - verifies an authenticated HTTP 200 baseline before measuring;
 - launches a `/status` probe every 500 ms;
-- uses a 2000 ms per-probe timeout by default;
+- applies a true end-to-end wall-clock deadline of 2000 ms per probe by default;
+- separately applies a 1500 ms connected-socket inactivity timeout at the default settings;
+- records whether a TCP connection event was observed (`connected=true|false`);
+- bounds concurrent probes to four at the default 500/2000 ms settings and reports a boundary skip instead of launching an unbounded fifth request;
 - never prints the bearer token;
 - asks for a standby marker and a wake marker;
 - reports each probe plus a machine-timed summary.
 
-`HOMEBACK_PROBE_TIMEOUT_MS` can override the per-probe timeout for a second measurement if the network silently drops packets for longer than 2 seconds. Keep the 500 ms probe cadence unchanged when comparing runs.
+`HOMEBACK_PROBE_TIMEOUT_MS` overrides the absolute per-probe budget from 500 to 30000 ms. The socket-idle timer is kept below that deadline when there is enough room; at the minimum 500 ms budget it is disabled rather than racing the absolute deadline.
 
-Example summary shape:
+The original Commit-3 probe used only `request.setTimeout()`. C5 testing showed black-holed TCP attempts lasting about 7.8 seconds despite the advertised 2000 ms setting. That Node API is useful for connected-socket inactivity but did not impose the required whole-request deadline on the measured connect path. The independent deadline is therefore a hardware-derived correction, not a theoretical cleanup.
+
+Example corrected summary shape:
 
 ```text
 summary
-standby_failure_mode=ECONNREFUSED
-standby_probe_latency_ms=3.2
-standby_detection_ms=508
-wake_to_http_ready_ms=2410
+standby_failure_mode=EPROBEDEADLINE
+standby_probe_latency_ms=2002.2
+standby_failure_connected=false
+standby_detection_ms=121657
+wake_to_http_ready_ms=53711
 ```
 
 Interpretation:
 
-- `ECONNREFUSED` means the request failed quickly at the socket/connect layer rather than consuming the full probe timeout.
-- `ETIMEDOUT` means no usable response arrived before the configured probe timeout.
+- `EPROBEDEADLINE` means the whole probe exceeded the configured wall-clock budget.
+- `ESOCKETTIMEDOUT` means a socket that existed became inactive before the absolute deadline.
+- `connected=true|false` is independent evidence and must be interpreted separately from the errno. C5 cycle 3, for example, briefly produced `EHOSTDOWN` with `connected=true`; do not turn an errno name into an assumed TCP-state label.
+- `ECONNREFUSED` means the request received a refusal; use the recorded latency and `connected` field rather than inferring more than the result proves.
 - `HTTP_401` means the listener answered but authentication failed; fix the token before interpreting standby behavior.
 - `HTTP_403` means the listener answered but source filtering rejected the measurement host; fix `allowedSources` before interpreting standby behavior.
 - another `HTTP_*` value is an application-level response and must be investigated rather than collapsed into a generic network failure.
 
-Record at least three standby/wake runs. Report the individual values and range; do not replace them with adjectives such as "fast" or "immediate".
+`standby_detection_ms` is the completion time of the first failed probe relative to the standby marker; when that probe ends by deadline it includes the probe's own deadline. For the tighter network-transition bound, compare the last successful completion with the reconstructed start time of the first failed probe. `wake_to_http_ready_ms` is measured on the same Mac process and therefore does not depend on TV wall-clock calibration.
 
-The 500 ms sampling cadence means `standby_detection_ms` and `wake_to_http_ready_ms` include up to roughly one probe interval of sampling uncertainty plus request latency. `standby_probe_latency_ms` is the direct failed-request duration and is the useful discriminator between refusal and a silent timeout.
+### Measured C5 standby/reboot baseline
 
-These numbers are the evidence for any Home Assistant `rest_command timeout:` recommendation. Until they exist, do not claim a C5-optimized timeout. Home Assistant currently supports an integer request timeout and defaults it to 10 seconds; the repository example intentionally leaves it unset during validation.
+Two corrected-instrument runs reproduced the same lifecycle on the tested C5/firmware:
+
+| Measurement | Corrected cycle 2 | Corrected cycle 3 |
+| --- | ---: | ---: |
+| Standby -> network-unavailable transition | `>119.297 s`, `<=119.787 s` | `>119.172 s`, `<=119.655 s` |
+| First failed probe | `EPROBEDEADLINE`, `connected=false` | `EPROBEDEADLINE`, `connected=false` |
+| Wake -> HTTP-ready observation window | `>54.328 s`, `<=54.830 s` | `>53.180 s`, `<=53.682 s` |
+| Wake -> first completed authenticated HTTP 200 | `54.877 s` | `53.711 s` |
+
+The two standby-transition windows overlap and sit just below 120 seconds. That is **highly repeatable on this tested C5/firmware and consistent with a fixed approximately-120-second platform timer**, but two corrected runs are not evidence for a webOS-wide constant.
+
+The deep transition is a real kernel/system reboot, not merely a HomeBack service restart. `/proc/uptime` reset, and after wake HomeBack injected fresh input targets rather than adopting the pre-standby processes.
+
+Boot-relative TV evidence was also reproducible:
+
+- cycle 2: HomeBack autostart worker at uptime `61.50 s`, HTTP already listening at `61.51 s`, remote input verified at `66.55 s`;
+- cycle 3: HomeBack autostart worker at uptime `60.05 s`, HTTP already listening at `60.06 s`, remote input verified at `67.42 s`.
+
+These uptime values are TV-kernel durations only. Do not combine them with a Mac wake marker by subtracting `/proc/uptime` from the TV's wall-clock `date`.
+
+### Clock-domain rule
+
+Mac/TV midpoint calibration showed a sharper rule than simply calling the TV clock unreliable: **the TV wall clock was stable within a boot session and discontinuous across boots**.
+
+For example, cycle 2 post-reboot and cycle 3 pre-reboot best offsets were about `-1592.5 ms` and `-1591.5 ms`, only 1 ms apart across many minutes. Cycle 3's reboot then changed the best offset to about `-2573.5 ms`, a roughly 982 ms step. An earlier cross-boot reconstruction even implied a kernel boot about 8.3 seconds *before* the recorded wake press, an impossible result that exposed the clock step.
+
+Per-boot calibration can therefore be useful. Cross-boot wall-clock correlation is not valid unless the relevant clock step is directly measured through the transition.
 
 ## Home Assistant HTTP gates
 
@@ -125,7 +166,7 @@ After the listener lifecycle is understood, validate from the real HA environmen
 
 Configure the README `rest_command.homeback_status` example and invoke it from Home Assistant.
 
-PASS requires an authenticated HTTP 200 response from the HA host with the production `allowedSources` rule in place.
+PASS requires an authenticated HTTP 200 response from the HA host with the intended `allowedSources` rule in place.
 
 ### 2. HA -> passive notification
 
@@ -180,11 +221,22 @@ Deliberately delay opening the recent camera event and test near/after the obser
 
 Do not change HomeBack's two-minute recent-event window based on assumption. Issue #21 remains open until the real signed/proxied URL lifecycle is measured.
 
-## TV-off semantics
+## TV-off and Recent Cameras semantics
 
-HomeBack intentionally has no notification backlog. When the TV/service is unavailable, the HA request should fail and the detection should be dropped.
+HomeBack intentionally has no notification backlog. Camera notifications are designed for a TV that is **already on**.
 
-Validate that a detection sent while the TV is unavailable is **not** replayed after wake. If Home Assistant automation logic is later changed to retry requests, that retry policy must preserve the same no-stale-alert requirement.
+On the tested C5, manually waking a sleeping TV is not a viable workaround for a real-time doorbell event: authenticated HTTP did not return until about 53-55 seconds after the wake marker in the two corrected runs. Queuing such a detection would turn it into a stale alert roughly a minute later, so HomeBack continues to fail/drop unavailable-TV events rather than replay them.
+
+`PreviewNotificationState.recentCameras` is intentionally volatile in-memory state. A kernel/service restart clears it. Do not persist signed Home Assistant media URLs merely to survive reboot while issue #21 has not established that those URLs remain useful or safe after the restart.
+
+The approximately-120-second standby grace period has a separate edge case: while the listener is still reachable, HA can receive HTTP 200 and `cameraRegistered: true` for an event accepted by HomeBack even though the subsequent reboot will erase that in-memory Recent Cameras entry. **HTTP 200 means the event was accepted while HomeBack was reachable; it does not prove a person saw the toast, and it does not make the event durable.**
+
+Validate both off-TV cases with real HA ingress:
+
+1. **Grace-window acceptance:** send a distinguishable event around 30 seconds after standby, confirm HTTP 200 / `cameraRegistered: true`, then allow deep standby to reboot the TV. After wake, verify that event is absent from Recent Cameras and is not replayed.
+2. **Deep-off drop:** send a distinguishable event after the listener is unavailable. The HA request must fail, and the event must not appear or replay after wake.
+
+If Home Assistant automation logic is later changed to retry requests, that retry policy must preserve the same no-stale-alert requirement.
 
 ## Evidence to record in issue #22
 
@@ -194,19 +246,21 @@ For the final hardware audit, record:
 - TV model, SDK and firmware;
 - Home Assistant version and deployment type;
 - HTTP config with token redacted;
-- `/remote/status` HTTP fields;
+- `/remote/status` including `httpConfigLoaded` and the other HTTP fields;
 - listener after service start: PASS/FAIL;
 - service restart restores listener: PASS/FAIL;
 - app-only restart behavior and any interruption;
-- standby failure mode;
-- standby failed-request latency for each run;
-- standby detection time for each run;
-- wake-to-HTTP-ready time for each run;
+- corrected standby failure mode, latency and `connected` state;
+- standby transition bounds for each corrected run;
+- wake-to-HTTP-ready time for each corrected run;
+- per-boot clock calibration when cross-host timestamps are being compared;
 - HA -> `/status`: PASS/FAIL;
 - HA -> passive notification: PASS/FAIL;
 - burst/newest-wins over HTTP: PASS/FAIL;
 - TV -> HA static JPEG: PASS/FAIL;
 - TV -> HA `camera_proxy_stream`: PASS/FAIL;
+- grace-window accepted-event/no-replay result;
+- deep-off drop/no-replay result;
 - delayed/expired-token result with issue #21 reference;
 - any deviations from the single-C5 baseline.
 
