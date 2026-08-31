@@ -13,16 +13,16 @@
       "shortDescription": "A fast replacement Home launcher and remote-button remapper for rooted LG webOS TVs.",
       "manifest": {
         "id": "com.homebrew.homeback",
-        "version": "0.4.22",
+        "version": "0.5.0",
         "type": "web",
         "title": "HomeBack",
         "appDescription": "A fast replacement Home launcher and remote-button remapper for rooted LG webOS TVs.",
         "iconUri": "https://raw.githubusercontent.com/angelcode1/webos-HomeBack/main/packages/app/manifests/icon130.png",
         "sourceUrl": "https://github.com/angelcode1/webos-HomeBack",
         "rootRequired": true,
-        "ipkUrl": "https://github.com/angelcode1/webos-HomeBack/releases/download/v0.4.22/com.homebrew.homeback_0.4.22_all.ipk",
+        "ipkUrl": "https://github.com/angelcode1/webos-HomeBack/releases/download/v0.5.0/com.homebrew.homeback_0.5.0_all.ipk",
         "ipkHash": {
-          "sha256": "ac32e06df9648985e5616314fcea289db84a85395bcc6040dde1d6fd7760b4a8"
+          "sha256": "230ba41c2a78f475835d02b810ff995356efa7d95fbcf3288468c5c84ec6cce4"
         }
       }
     }
