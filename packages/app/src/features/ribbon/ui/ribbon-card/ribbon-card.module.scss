@@ -10,40 +10,31 @@ $card-height: 160px;
 $selected-card-height: 188px;
 
 .card {
-	transition: transform 160ms ease, height 160ms ease;
+	transition: transform 160ms ease;
 	--card-color: #ffffff;
 
 	position: relative;
-
 	flex-shrink: 0;
-
 	display: flex;
 	align-items: center;
 	justify-content: center;
-
 	appearance: none;
 	background: none;
 	outline: none;
-
 	width: $card-width;
 	height: $card-height;
-
 	padding: 0;
 	margin-left: 2px;
 	border: 0;
-
 	user-select: none;
 	-webkit-user-select: none;
 
 	&::after {
 		content: '';
 		z-index: -1;
-
 		position: absolute;
 		inset: 0;
-
 		transform: skewX(-9.5deg);
-
 		background-color: var(--card-color);
 		opacity: 0.85;
 	}
@@ -62,13 +53,10 @@ $selected-card-height: 188px;
 .icon {
 	width: $icon-size;
 	height: $icon-size;
-
 	object-fit: contain;
 	pointer-events: none;
 }
 
-/* Inputs uses 80% of the normal card width and scales its artwork by the
- * same factor so the icon/card proportions stay unchanged. */
 .inputCard {
 	width: $input-card-width;
 }
@@ -78,11 +66,6 @@ $selected-card-height: 188px;
 	height: $input-icon-size;
 }
 
-/*
- * Keypad and Add apps are compact utility controls rather than app artwork.
- * Keep the same card height but make both cards 30% narrower, and scale their
- * icons by the same factor so the artwork remains proportional.
- */
 .compactUtilityCard {
 	width: $compact-utility-card-width;
 }
@@ -95,68 +78,45 @@ $selected-card-height: 188px;
 .editControl {
 	position: absolute;
 	z-index: 30;
-
 	display: flex;
 	align-items: center;
 	justify-content: center;
-
 	width: 46px;
 	height: 46px;
-
 	color: #ffffff;
-
-	filter:
-		drop-shadow(
-			0 2px 5px rgba(0, 0, 0, 0.9)
-		);
-
+	filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.9));
 	cursor: pointer;
 
 	svg {
 		width: 38px;
 		height: 38px;
-
 		pointer-events: none;
 	}
 }
 
 .removeControl {
-	/*
-	 * Keep a generous invisible pointer target, but render only the white
-	 * bin glyph. Selection is communicated by enlarging the glyph rather
-	 * than drawing a coloured tile, border, or background around it.
-	 */
 	top: -60px;
 	left: calc(50% + 18px);
-
 	width: 96px;
 	height: 72px;
-
 	color: #ffffff;
 	background: transparent;
 	box-shadow: none;
 	border: 0;
 	border-radius: 0;
-
 	transform: translateX(-50%);
 
 	svg {
 		display: block;
 		width: 48px;
 		height: 48px;
-
 		transform: scale(1);
 		transform-origin: center;
-
-		transition:
-			width 120ms ease,
-			height 120ms ease,
-			transform 120ms ease;
+		transition: transform 120ms ease;
 	}
 
 	&:hover svg {
-		width: 66px;
-		height: 66px;
+		transform: scale(1.375);
 	}
 }
 
@@ -166,22 +126,19 @@ $selected-card-height: 188px;
 	box-shadow: none;
 
 	svg {
-		width: 66px;
-		height: 66px;
+		transform: scale(1.375);
 	}
 }
 
 .leftControl {
 	top: 50%;
 	left: -51px;
-
 	transform: translateY(-50%);
 }
 
 .rightControl {
 	top: 50%;
 	right: -51px;
-
 	transform: translateY(-50%);
 }
 
