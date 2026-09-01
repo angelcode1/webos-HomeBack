@@ -10,10 +10,12 @@ import {
 
 import { AppDrawerService } from '../app-drawer';
 import { ScrollService } from '../scroll';
+import { RemoteHealthService } from './remote-health.service';
 import { RibbonService } from './ribbon.service';
 
 const scrollService = new ScrollService(settingsService);
 const appDrawerService = new AppDrawerService(launcherService, keyboardService);
+const remoteHealthService = new RemoteHealthService();
 
 export const ribbonService = new RibbonService(
 	launcherService,
@@ -22,6 +24,7 @@ export const ribbonService = new RibbonService(
 	activationService,
 	surfaceService,
 	keyboardService,
+	remoteHealthService,
 );
 
 reaction(
