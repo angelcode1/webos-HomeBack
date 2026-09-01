@@ -1,9 +1,6 @@
-// Five seconds collapses camera detector bursts without hiding distinct events
-// for long. Suppressed events still refresh the recent-camera media reference.
+import { clampInteger, normalizedText } from '@homeback/utils';
+
 export const PREVIEW_TOAST_SUPPRESSION_MS = 5_000;
-// Recent Cameras is an event convenience, not a durable camera directory. HA
-// signed proxy URLs rotate, so stop offering an old URL after a short window
-// rather than pretending HomeBack can refresh credentials on its own.
 export const RECENT_CAMERA_FRESHNESS_MS = 2 * 60_000;
 export const RECENT_CAMERA_MAX_ENTRIES = 32;
 
@@ -52,9 +49,6 @@ const normalizedString = (value: unknown): string | null => {
 	return normalized || null;
 };
 
-const displayText = (value: unknown, maxLength: number): string | null =>
-	normalizedString(value)?.slice(0, maxLength) ?? null;
-
 const truncateCodePoints = (value: string, maxLength: number): string => {
 	let result = '';
 
@@ -71,14 +65,6 @@ const boundedOpaqueString = (value: unknown, maxLength: number): string | null =
 	return normalized && normalized.length <= maxLength ? normalized : null;
 };
 
-const boundedDuration = (value: unknown): number | null => {
-	if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-	return Math.min(
-		PREVIEW_MAX_DURATION_MS,
-		Math.max(PREVIEW_MIN_DURATION_MS, Math.trunc(value)),
-	);
-};
-
 export const getPreviewNotificationKey = (request: PreviewNotificationRequest): string =>
 	boundedOpaqueString(request.cameraId, CAMERA_ID_MAX_LENGTH) ?? DEFAULT_NOTIFICATION_KEY;
 
@@ -86,21 +72,14 @@ export const buildPreviewToastRequest = (
 	request: PreviewNotificationRequest,
 	sourceId: string,
 ): NotificationToastRequest => {
-	// webOS documents a 60-character toast limit without defining its Unicode
-	// counting semantics. Bound UTF-16 length conservatively while iterating by
-	// code point so truncation never splits a valid surrogate pair. Keep the title
-	// to 24 UTF-16 units so an unusually long friendly name cannot consume the
-	// event text entirely.
-	const rawTitle = displayText(request.title, TITLE_MAX_LENGTH);
+	const rawTitle = normalizedText(request.title, TITLE_MAX_LENGTH);
 	const title = rawTitle ? truncateCodePoints(rawTitle, TOAST_TITLE_MAX_LENGTH) : null;
-	const message = displayText(request.message, MESSAGE_MAX_LENGTH) ?? 'Camera event';
+	const message = normalizedText(request.message, MESSAGE_MAX_LENGTH) ?? 'Camera event';
 	const combined = title ? `${title}: ${message}` : message;
 
 	return {
 		message: truncateCodePoints(combined, TOAST_MESSAGE_MAX_LENGTH),
 		sourceId,
-		// On the tested webOS 10 TV, "light" selects the compact top-right toast
-		// form. It does not force a light colour theme; webOS owns toast styling.
 		type: 'light',
 	};
 };
@@ -114,19 +93,23 @@ export const buildRecentCameraEntry = (
 	if (!imageUrl) return null;
 
 	const title =
-		displayText(preview.title, TITLE_MAX_LENGTH) ??
-		displayText(request.title, TITLE_MAX_LENGTH) ??
+		normalizedText(preview.title, TITLE_MAX_LENGTH) ??
+		normalizedText(request.title, TITLE_MAX_LENGTH) ??
 		'Camera preview';
 	const message =
-		displayText(preview.message, MESSAGE_MAX_LENGTH) ??
-		displayText(request.message, MESSAGE_MAX_LENGTH);
+		normalizedText(preview.message, MESSAGE_MAX_LENGTH) ??
+		normalizedText(request.message, MESSAGE_MAX_LENGTH);
 
 	return {
 		cameraId: getPreviewNotificationKey(request),
 		title,
 		message,
 		imageUrl,
-		durationMs: boundedDuration(preview.durationMs) ?? PREVIEW_DEFAULT_DURATION_MS,
+		durationMs: clampInteger(
+			preview.durationMs,
+			PREVIEW_MIN_DURATION_MS,
+			PREVIEW_MAX_DURATION_MS,
+		) ?? PREVIEW_DEFAULT_DURATION_MS,
 		receivedAt,
 		expiresAt: receivedAt + RECENT_CAMERA_FRESHNESS_MS,
 	};
@@ -190,8 +173,6 @@ export class PreviewNotificationState {
 	}
 
 	private reserveToast(key: string, reservedAt: number): void {
-		// Reserve synchronously before the async LS2 createToast call. This makes
-		// concurrent burst requests deterministic without a per-camera Promise queue.
 		this.lastToastAt.delete(key);
 		this.lastToastAt.set(key, reservedAt);
 		while (this.lastToastAt.size > TOAST_SUPPRESSION_MAX_KEYS) {
@@ -202,8 +183,6 @@ export class PreviewNotificationState {
 	}
 
 	private upsertRecentCamera(camera: RecentCameraEntry): void {
-		// A suppressed burst member must still become the camera's newest media
-		// reference. Delete + set also refreshes insertion order for bounded eviction.
 		this.recentCameras.delete(camera.cameraId);
 		this.recentCameras.set(camera.cameraId, camera);
 		while (this.recentCameras.size > RECENT_CAMERA_MAX_ENTRIES) {
