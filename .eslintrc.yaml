@@ -150,19 +150,6 @@ overrides:
         - ts: never
           tsx: never
 
-  # Node's native TypeScript test loader follows ESM resolution rules for runtime
-  # edges. Keep explicit .ts specifiers limited to the small test-reachable seam
-  # instead of forcing an extension-style migration across webpack source.
-  - files:
-      - packages/utils/index.ts
-      - packages/service/src/http-server.ts
-      - packages/service/src/native-config-writer.ts
-      - packages/service/src/remote-default-migration.lib.ts
-      - packages/service/src/remote-process-scanner.ts
-      - packages/service/src/remote-press-state-machine.ts
-    rules:
-      import/extensions: off
-
   - files: [ '*.config.ts', 'webpack.*.ts' ]
     rules:
       no-restricted-exports: off
