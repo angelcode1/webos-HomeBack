@@ -1,13 +1,15 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { constants as fsConstants, promises as fs } from 'node:fs';
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { isIP, type Socket } from 'node:net';
-import { dirname } from 'node:path';
+import { randomBytes, timingSafeEqual } from 'crypto';
+import { constants as fsConstants, promises as fs } from 'fs';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http';
+import { isIP, type Socket } from 'net';
+import { dirname } from 'path';
 
+import { isPlainObject } from '@homeback/utils';
+
+import { HOME_BACK_CONFIG_DIR } from './homeback-paths.ts';
 import type { PreviewNotificationRequest } from './notification';
 import type { PreviewNotificationResult } from './preview-notification-service';
 
-const HOME_BACK_CONFIG_DIR = '/home/root/.config/homeback';
 export const HTTP_CONFIG_PATH = `${HOME_BACK_CONFIG_DIR}/http.json`;
 export const HTTP_TOKEN_PATH = `${HOME_BACK_CONFIG_DIR}/api-token`;
 export const DEFAULT_HTTP_PORT = 9_876;
@@ -95,9 +97,6 @@ const readRegularFile = async (path: string): Promise<string> => {
 	return fs.readFile(path, 'utf8');
 };
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
-	Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-
 const parseAllowedSource = (value: unknown): string | null => {
 	if (typeof value !== 'string') return null;
 	const rule = value.trim();
@@ -111,9 +110,9 @@ const parseAllowedSource = (value: unknown): string | null => {
 };
 
 export const parseHttpPreviewConfig = (value: unknown): HttpPreviewConfig | null => {
-	if (!isObject(value)) return null;
+	if (!isPlainObject(value)) return null;
 	const http = value.http;
-	if (!isObject(http)) return null;
+	if (!isPlainObject(http)) return null;
 	if (typeof http.enabled !== 'boolean') return null;
 
 	const port = http.port ?? DEFAULT_HTTP_PORT;
@@ -228,7 +227,7 @@ const readJsonObjectBody = (request: IncomingMessage): Promise<BodyReadResult> =
 		const onEnd = (): void => {
 			try {
 				const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
-				finish(isObject(parsed) ? { ok: true, value: parsed } : { ok: false, statusCode: 400 });
+				finish(isPlainObject(parsed) ? { ok: true, value: parsed } : { ok: false, statusCode: 400 });
 			} catch {
 				finish({ ok: false, statusCode: 400 });
 			}
@@ -352,7 +351,7 @@ export class HttpPreviewServer {
 			});
 		});
 		server.headersTimeout = HTTP_TIMEOUT_MS;
-		if ('requestTimeout' in server) server.requestTimeout = HTTP_TIMEOUT_MS;
+		server.requestTimeout = HTTP_TIMEOUT_MS;
 		server.timeout = HTTP_TIMEOUT_MS;
 		server.keepAliveTimeout = HTTP_KEEP_ALIVE_TIMEOUT_MS;
 		server.maxHeadersCount = 32;

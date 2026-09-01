@@ -95,6 +95,7 @@ class LunaOneShot<T extends Record<string, any>, P extends LunaRequestParams = {
 
 			const cleanup = (): void => {
 				bridge.onservicecallback = () => undefined;
+				bridge.cancel();
 				this.bridge = null;
 			};
 

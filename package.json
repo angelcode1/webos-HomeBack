@@ -9,11 +9,11 @@
     "dev": "webpack serve --mode development",
     "lint": "node scripts/verify-lint-coverage.cjs && yarn workspaces foreach --all --parallel run lint",
     "typecheck": "tsc -p packages/app/tsconfig.json && tsc -p packages/service/tsconfig.json && tsc -p packages/utils/tsconfig.json",
-    "check": "yarn verify:optimized && yarn test && yarn typecheck",
-    "verify:optimized": "node scripts/verify-optimized-source.cjs",
+    "check": "yarn test && yarn typecheck && yarn verify:catalog",
     "check:full": "yarn check && yarn lint",
-    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test": "node --experimental-transform-types --test tests/*.test.ts",
     "format": "prettier --write .",
+    "verify:catalog": "node scripts/verify-catalog.cjs",
     "verify:publication": "node scripts/verify-publication.cjs"
   },
   "workspaces": [

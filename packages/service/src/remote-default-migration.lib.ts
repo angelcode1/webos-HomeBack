@@ -1,4 +1,9 @@
-import type { RemoteConfig, RemoteMapping, TimedMapping } from './remote-config';
+import {
+	isTimedMapping,
+	type RemoteConfig,
+	type RemoteMapping,
+	type TimedMapping,
+} from './remote-config.ts';
 
 type ShortcutState = {
 	label: string;
@@ -43,9 +48,6 @@ const SHORTCUT_MIGRATIONS: Record<string, ShortcutMigration> = {
 		],
 	},
 };
-
-const isTimedMapping = (mapping: RemoteMapping): mapping is TimedMapping =>
-	'short' in mapping || 'long' in mapping || 'longPressMs' in mapping;
 
 const matchesShortcutState = (
 	mapping: RemoteMapping | undefined,

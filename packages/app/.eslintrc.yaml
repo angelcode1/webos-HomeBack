@@ -14,3 +14,16 @@ env:
 settings:
   react:
     version: detect
+
+rules:
+  no-restricted-syntax:
+    - error
+    - selector: "CallExpression[callee.object.name='webOSSystem'][callee.property.name='hide']"
+      message: Use SurfaceService instead of calling webOSSystem.hide directly.
+    - selector: "CallExpression[callee.object.name='webOSSystem'][callee.property.name='activate']"
+      message: Use SurfaceService instead of calling webOSSystem.activate directly.
+
+overrides:
+  - files: [ 'src/shared/services/surface/surface.service.ts' ]
+    rules:
+      no-restricted-syntax: off

@@ -40,10 +40,6 @@ export class KeyboardService {
 		this.resetEnterState();
 	}
 
-	public isOwner(owner: KeyboardOwner): boolean {
-		return this.owner === owner;
-	}
-
 	public subscribe(ref: KeyboardTarget = document, capture = true): void {
 		if (this.ref === ref && this.capture === capture) return;
 		this.unsubscribe();

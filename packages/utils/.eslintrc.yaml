@@ -8,3 +8,8 @@ parserOptions:
 
 env:
   node: true
+
+overrides:
+  - files: [ './index.ts' ]
+    rules:
+      import/extensions: off

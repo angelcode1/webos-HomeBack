@@ -5,7 +5,7 @@ import {
 	readSync,
 } from 'fs';
 
-export const MAX_LOG_READ = 256 * 1024;
+const MAX_LOG_READ = 256 * 1024;
 export const MAX_LOG_BYTES = 2 * 1024 * 1024;
 
 export type EventLogCursor = {

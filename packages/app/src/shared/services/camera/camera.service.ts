@@ -1,5 +1,7 @@
 import { makeAutoObservable } from 'mobx';
 
+import { isPlainObject } from '@homeback/utils';
+
 import { luna } from '../luna';
 import type { CameraEntry } from './camera.lib';
 
@@ -14,7 +16,7 @@ type CameraListResponse = {
 };
 
 const validCameraEntry = (value: unknown): value is CameraEntry => {
-	if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+	if (!isPlainObject(value)) return false;
 	const camera = value as Partial<CameraEntry>;
 	return typeof camera.cameraId === 'string' &&
 		typeof camera.title === 'string' &&
@@ -47,11 +49,6 @@ export class NotificationCameraProvider implements CameraProvider {
 		);
 		this.cameras = response.cameras.filter(validCameraEntry);
 		this.pruneExpiredAndSchedule();
-	}
-
-	public dispose(): void {
-		if (this.expiryTimer) clearTimeout(this.expiryTimer);
-		this.expiryTimer = null;
 	}
 
 	private pruneExpiredAndSchedule(): void {

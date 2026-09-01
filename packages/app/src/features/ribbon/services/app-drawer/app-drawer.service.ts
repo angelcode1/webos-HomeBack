@@ -52,6 +52,14 @@ export class AppDrawerService {
 		return this.launcherService.hidden;
 	}
 
+	public open(): void {
+		this.visible = true;
+	}
+
+	public close(): void {
+		this.visible = false;
+	}
+
 	public containerRef(ref: HTMLElement | null): void {
 		this.ref = ref;
 		if (ref && this.visible) ref.focus();
@@ -69,7 +77,7 @@ export class AppDrawerService {
 	public activate(launchPoint: LaunchPointInstance): void {
 		this.focusToLaunchPoint(launchPoint);
 		launchPoint.show();
-		this.visible = false;
+		this.close();
 	}
 
 	public handleWheel(deltaY: number): void {
@@ -97,10 +105,10 @@ export class AppDrawerService {
 		if (!this.visible) return;
 		const launchPoint = this.items[this.index];
 		if (launchPoint) this.activate(launchPoint);
-		else this.visible = false;
+		else this.close();
 	}
 
 	private handleBack(): void {
-		if (this.visible) this.visible = false;
+		if (this.visible) this.close();
 	}
 }
