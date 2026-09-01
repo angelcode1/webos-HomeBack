@@ -16,3 +16,14 @@ overrides:
   - files: [ './src/index.ts' ]
     rules:
       require-yield: off
+
+  # Node's native TypeScript test loader follows ESM resolution rules for
+  # runtime edges. Limit explicit .ts specifiers to the test-reachable seam.
+  - files:
+      - './src/http-server.ts'
+      - './src/native-config-writer.ts'
+      - './src/remote-default-migration.lib.ts'
+      - './src/remote-press-state-machine.ts'
+      - './src/remote-process-scanner.ts'
+    rules:
+      import/extensions: off
