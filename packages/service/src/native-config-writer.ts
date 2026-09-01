@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 
-import { buildNativeKeybinds, type RemoteConfig } from './remote-config';
-import { writeFile, writeFileAtomicSync } from './utils';
+import { buildNativeKeybinds, type RemoteConfig } from './remote-config.ts';
+import { writeFile, writeFileAtomicSync } from './utils.ts';
 
 const serializeNativeConfig = (config: RemoteConfig, timedMappingsArmed: boolean): string =>
 	`${JSON.stringify(buildNativeKeybinds(config, timedMappingsArmed), null, '\t')}\n`;
