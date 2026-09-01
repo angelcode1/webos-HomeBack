@@ -13,7 +13,7 @@ export const RibbonAppDrawer = observer((): JSX.Element => {
 
 	return createPortal(
 		<div className={`${s.root} ${active ? s.active : ''}`} aria-hidden={!active}>
-			<div className={s.backdrop} onClick={() => { service.appDrawerService.visible = false; }} />
+			<div className={s.backdrop} onClick={service.appDrawerService.close} />
 			<div className={s.drawer}>
 				<h1 className={s.header}>Apps</h1>
 				{active && <RibbonAppDrawerList />}
