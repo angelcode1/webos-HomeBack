@@ -5,8 +5,6 @@ import type { SystemInfoMessage } from '../api/system-info.interface';
 import { systemInfoKeys } from '../lib/system-info-keys.lib';
 
 export class SystemInfoService {
-	public firmwareVersion: string | null = null;
-	public modelName: string | null = null;
 	public sdkVersion: string | null = null;
 
 	public constructor() {
@@ -19,14 +17,6 @@ export class SystemInfoService {
 			.then(message => {
 				if (!message.returnValue) return;
 				runInAction(() => {
-					this.firmwareVersion =
-						typeof message.firmwareVersion === 'string'
-							? message.firmwareVersion
-							: null;
-					this.modelName =
-						typeof message.modelName === 'string'
-							? message.modelName
-							: null;
 					this.sdkVersion =
 						typeof message.sdkVersion === 'string'
 							? message.sdkVersion
