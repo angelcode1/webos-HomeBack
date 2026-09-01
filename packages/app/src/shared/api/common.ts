@@ -1,6 +1,12 @@
+import {
+	APPLICATION_MANAGER_URI,
+	HOME_BACK_PREVIEW_INTENT,
+	HOME_BACK_SHOW_INTENT,
+} from '@homeback/utils';
+
 export const Intent = {
-	ShowHomeBack: 'homeback:show',
-	Preview: 'homeback:preview',
+	ShowHomeBack: HOME_BACK_SHOW_INTENT,
+	Preview: HOME_BACK_PREVIEW_INTENT,
 } as const;
 
 export type Intent = typeof Intent[keyof typeof Intent];
@@ -19,7 +25,7 @@ export interface ActivateType {
 	preview?: PreviewLaunchPayload;
 }
 
-export const APPLICATION_MANAGER_URI = 'luna://com.webos.service.applicationManager';
+export { APPLICATION_MANAGER_URI };
 
 export const parseActivateType = (serialized: string): ActivateType => {
 	if (!serialized) return {};
