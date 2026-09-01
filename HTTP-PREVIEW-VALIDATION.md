@@ -1,44 +1,82 @@
 # HTTP Preview transport validation
 
-This document is the hardware-validation procedure and current measured baseline for HomeBack's opt-in authenticated HTTP transport for Preview camera notifications.
+This document records the validation procedure and measured baseline for HomeBack's opt-in authenticated HTTP transport for Preview camera notifications.
 
-It does **not** turn single-device evidence into a general webOS claim. The existing camera surface/notification behavior and the HTTP listener lifecycle below were validated on one LG OLED42C5PSA.AAUQLJD running webOS SDK 10.0.0 / firmware 33.00.71. The real Home Assistant notification/media path still has open gates.
+The hardware evidence is intentionally scoped. Runtime behavior was validated on one **LG OLED42C5PSA.AAUQLJD** running **webOS SDK 10.0.0 / firmware 33.00.71**. Real Home Assistant ingress and media tests were run against Home Assistant OS on the same LAN. Do not generalise single-device or synthetic-camera findings to other LG models, firmware, Home Assistant deployments, or camera integrations without testing.
 
-Issue [#22](https://github.com/angelcode1/webos-HomeBack/issues/22) tracks this transport. Issue [#21](https://github.com/angelcode1/webos-HomeBack/issues/21) separately tracks real Home Assistant signed/proxied media URL lifetime.
+Issue [#22](https://github.com/angelcode1/webos-HomeBack/issues/22) tracks the HTTP transport. Issue [#21](https://github.com/angelcode1/webos-HomeBack/issues/21) tracks Home Assistant camera-token lifetime separately.
 
-## Preconditions
+The runtime candidate measured on hardware is commit `f3e4c6e1517e156ee2d62755b180960eebee216b`. The later documentation-only validation commit does not change `packages/`, the standby script, package/version metadata, catalogs, workflows, tags, or release artifacts.
+
+## Final validation state
+
+Hardware-proven on the tested C5 unless qualified otherwise:
+
+- listener bootstrap, enable, authentication, token creation/rotation/persistence: **PASS**;
+- `httpConfigLoaded` transient and settled restart states: **PASS**;
+- service restart restores HTTP and remote input: **PASS**;
+- app-only restart leaves the service-owned listener available: **PASS** — `restartApp` returned `done:true`; 60/60 HTTP probes at roughly 250 ms cadence returned 200, so no interruption was observed at that sampling resolution;
+- final source restriction: **PASS** — HA-only `allowedSources`; Home Assistant received HTTP 200 while a Mac using the correct bearer token received HTTP 403;
+- real HA `rest_command` -> authenticated `/status`: **PASS**;
+- real HA passive camera notification: **PASS**;
+- five-event same-camera burst over real HTTP ingress: **BEHAVIORAL PASS** — exactly one toast was observed and Recent Cameras retained event 5/newest media; the exact one-unsuppressed/four-suppressed response split remains CI/unit-test proven rather than independently captured from the HA burst trace;
+- TV -> HA ordinary static JPEG: **PASS**;
+- TV -> HA `camera_proxy_stream`: **PASS** for a synthetic FFmpeg camera after constraining it to camera-like output; moving video rendered smoothly with no observed stalls after the proxy path was warm;
+- HA `camera_proxy` single-JPEG snapshot: **PASS after warm-up** on the same synthetic FFmpeg camera;
+- first-open media differential: **CHARACTERISED** — packaged `file://` PNG and ordinary HA `/local/*.jpg` rendered on first Preview activation, while both synthetic-camera `camera_proxy` and `camera_proxy_stream` were blank/white on first activation and rendered on the second. This exonerates the HomeBack cold Preview surface and generic WAM remote-HTTP image loading in that test. The exact HA proxy/FFmpeg warm-up mechanism was not timed directly;
+- fixed HA camera token lifetime relative to Recent Cameras: **CHARACTERISED** — the same token returned HTTP 200 at about 2 s, 62 s, 183 s and 302 s, and HTTP 403 by 600 s. Exact expiry was not measured. HomeBack's 120 s Recent Cameras lifetime therefore expired first by at least about 180 s in this run;
+- HA Core restart invalidated the pre-restart camera token immediately in the measured test: **PASS/CHARACTERISED**;
+- Recent Cameras process volatility: **PASS** — a registered entry with an exact 120000 ms TTL disappeared immediately after `restartService`, well inside its TTL;
+- standby lifecycle: **CHARACTERISED AS STATE-DEPENDENT** — an unavailable/reboot mode is hardware-proven, but it was not unconditional in a later session;
+- deep-off real-HA request drop in the later session: **NOT REPRODUCED** because the unavailable state was not reached. Do not label that later attempt PASS or FAIL.
+
+CI additionally proves request parsing/security edge cases, exact same-camera concurrency response semantics, first-enable bind-failure/token behavior, and the corrected standby probe's bounded deadline/in-flight logic. Keep CI-proven facts separate from hardware-proven facts.
+
+## Preconditions and security boundary
 
 Before measuring:
 
 1. Install the candidate build on the TV.
 2. Enable HTTP in `/home/root/.config/homeback/http.json` as documented in the README.
-3. Prefer an exact Home Assistant IPv4 address in `allowedSources`. If the measurement machine is different, either run the probe from the HA host or temporarily use `allowedSources: []`, which permits authenticated RFC1918 IPv4 clients, and record that broader validation boundary.
-4. Confirm `/remote/status` reports `httpConfigLoaded: true`, `httpEnabled: true`, `httpListening: true`, the expected port and `httpFailureReason: null`.
-5. Confirm authenticated `GET /status` returns HTTP 200 from the intended client network.
-6. Record the exact TV model, SDK version, firmware version, candidate commit SHA and Home Assistant version before interpreting results.
+3. Prefer an exact Home Assistant IPv4 address in `allowedSources`. Broaden the list only for a deliberate measurement and narrow it again afterwards.
+4. Confirm `/remote/status` settles to `httpConfigLoaded: true`, `httpEnabled: true`, `httpListening: true`, the expected port and `httpFailureReason: null`.
+5. Confirm authenticated `GET /status` returns HTTP 200 from the intended allowed host.
+6. Record TV model, SDK, firmware, candidate commit, Home Assistant deployment/version when known, and relevant LG power settings. Record **Quick Start+** state when known; it is a lifecycle hypothesis/variable, not a demonstrated cause of the differing standby modes.
 
-On the measured C5, a fresh **manual candidate-IPK install** required one HomeBack app launch before root-helper initialisation and default HTTP-config creation had completed. Do not generalise that exact bootstrap sequence beyond the measured manual-install path.
+The HomeBack listener is plain HTTP with bearer authentication. It is a trusted-LAN Preview feature, not an Internet-facing API. Do not expose the port to an untrusted network, and never put the bearer token or Home Assistant long-lived tokens in issue comments, CI logs, screenshots, or validation transcripts.
 
-Do not put the bearer token in issue comments, CI logs, screenshots or validation transcripts.
+On the measured C5, a fresh **manual candidate-IPK install** required one HomeBack app launch before root-helper initialisation and default HTTP-config creation completed. That bootstrap sequence is scoped to the measured manual-install path.
 
 ## Service lifecycle gates
 
-### 1. Listener after service start
+### Listener start and `httpConfigLoaded`
 
-From an allowed LAN client, call authenticated `GET /status` immediately after the HomeBack service starts.
+Immediately after a service restart, `/remote/status` was observed in a real transient state with:
 
-PASS requires:
+```text
+started: false
+httpConfigLoaded: false
+httpEnabled: false
+httpListening: false
+httpFailureReason: null
+```
 
-- `/remote/status` first distinguishes configuration that has not loaded yet with `httpConfigLoaded: false`;
-- after a valid config loads, `httpConfigLoaded: true` is reported even when HTTP is intentionally disabled;
-- when enabled, the TCP/HTTP listener becomes reachable;
-- authenticated `/status` returns HTTP 200;
-- `/remote/status` reports `httpEnabled: true` and `httpListening: true`;
-- remote input remains healthy independently of HTTP state.
+A subsequent status read settled to:
 
-This explicit config-loaded field exists because C5 hardware testing reproduced a transient restart window in which the old fields alone looked exactly like a successfully loaded disabled configuration.
+```text
+started: true
+httpConfigLoaded: true
+httpEnabled: true
+httpListening: true
+httpPort: 9876
+httpFailureReason: null
+nativeOwnershipVerified: true
+eventTailerHealthy: true
+```
 
-### 2. Service restart restores the listener
+This is the hardware behavior Commit 4 was designed to expose: an in-flight/not-yet-loaded configuration no longer masquerades as a successfully loaded disabled listener.
+
+### Service restart
 
 Request:
 
@@ -48,11 +86,11 @@ luna-send -n 1 -f \
   '{}'
 ```
 
-Probe `/status` continuously across the restart. PASS requires the old listener to disappear and a new authenticated HTTP 200 to return after service activation without changing the token or config.
+The packaged candidate restored the listener and remote-input service with the same config/token. The measured ordinary restart exercised the safe existing-hook adoption path (`source: "adopted"`). Adoption is evidence that branch was taken; it is not independent proof that stale input was induced.
 
-On the measured C5, an ordinary service restart also exercised HomeBack's existing-hook adoption path (`source: "adopted"`). That path starts the event log at EOF to avoid replaying stale pre-restart input events. Treat this as evidence that the adoption branch was taken, not as a claim that stale input was independently induced and measured.
+A separate direct volatility test registered `camera.volatility_probe`, confirmed `expiresAt - receivedAt = 120000`, called `restartService`, and immediately observed an empty camera registry. This proves Recent Cameras is process-local volatile state well inside the normal TTL.
 
-### 3. App-only restart does not own the listener
+### App-only restart
 
 Request:
 
@@ -62,206 +100,220 @@ luna-send -n 1 -f \
   '{}'
 ```
 
-PASS requires the HTTP listener to remain service-owned and available while the UI app is closed/relaunched. Record any observed interruption rather than assuming there is none.
+The valid run placed the restart inside a 60-probe window. `restartApp` returned `returnValue:true, done:true`; every probe before, across and after the restart returned HTTP 200. Probe cadence was approximately 250 ms. Record the result precisely as **no listener interruption observed at that sampling resolution**, not as a mathematical zero-millisecond interruption guarantee.
 
-### 4. Optional HTTP failure remains fail-open
+### Optional HTTP failure remains fail-open
 
-Occupy the configured port or otherwise reproduce a bounded listener-start failure if practical.
+CI directly covers `EADDRINUSE`: a valid config remains identifiable as loaded, the listener reports a bounded failure without killing critical remote input, and a first-enable bind failure does not create a token. This specific bind-failure branch is CI-proven rather than separately reproduced on final hardware.
 
-PASS requires:
+## Source filtering / final configuration
 
-- HomeBack's critical remote-input service remains running;
-- a valid config remains identifiable with `httpConfigLoaded: true`;
-- `/remote/status` reports `httpListening: false` with a bounded `httpFailureReason`;
-- no unhandled server error terminates the service;
-- a first-enable bind failure does not create a new token file.
+The final measured configuration was narrowed to the Home Assistant host only. With that rule active:
 
-The CI suite already exercises `EADDRINUSE`; this hardware gate checks that the packaged service behaves the same way on the TV runtime.
+- an authenticated Mac request using the known-good HomeBack bearer returned **HTTP 403**;
+- a real Home Assistant `rest_command.homeback_status` request returned **HTTP 200** with `{"ok":true,"version":"0.5.0"}`.
+
+Using the correct bearer for the blocked Mac test matters: the 403 is evidence of source filtering, not merely failed authentication.
+
+`allowedSources: []` means authenticated RFC1918 IPv4 clients are permitted; it is **not** deny-all. Pin the HA host when practical.
 
 ## Standby/wake measurement
 
-Use `scripts/measure-http-preview-standby.cjs`; do not hand-time this gate.
+Use `scripts/measure-http-preview-standby.cjs` rather than hand-timing network failure. The corrected script:
 
-Run from the Home Assistant host when possible so source routing and filtering match the real automation path. If that host cannot run Node, use another allowed LAN host and record that the source differs from HA.
+- establishes an authenticated HTTP 200 baseline;
+- probes every 500 ms;
+- imposes a true whole-request wall-clock deadline (2000 ms by default);
+- keeps connected-socket inactivity as a separate diagnostic;
+- records `connected=true|false` independently of errno;
+- caps live probes instead of allowing unbounded overlap;
+- never prints the token.
 
-```sh
-HOMEBACK_TOKEN="$(ssh root@TV-IP cat /home/root/.config/homeback/api-token)" \
-  node scripts/measure-http-preview-standby.cjs http://TV-IP:9876
-```
+The original probe used only Node `request.setTimeout()`. On the C5 black-holed-connect path it allowed requests to run for about 7.8 s despite the configured 2 s timeout. Commit 4 corrected that with an independent absolute deadline; corrected failures ended around 2.00 s as `EPROBEDEADLINE,connected=false`.
 
-The corrected script:
+### Observed lifecycle mode A — unavailable/reboot around 120 s
 
-- verifies an authenticated HTTP 200 baseline before measuring;
-- launches a `/status` probe every 500 ms;
-- applies a true end-to-end wall-clock deadline of 2000 ms per probe by default;
-- separately applies a 1500 ms connected-socket inactivity timeout at the default settings;
-- records whether a TCP connection event was observed (`connected=true|false`);
-- bounds concurrent probes to four at the default 500/2000 ms settings and reports a boundary skip instead of launching an unbounded fifth request;
-- never prints the bearer token;
-- asks for a standby marker and a wake marker;
-- reports each probe plus a machine-timed summary.
-
-`HOMEBACK_PROBE_TIMEOUT_MS` overrides the absolute per-probe budget from 500 to 30000 ms. The socket-idle timer is kept below that deadline when there is enough room; at the minimum 500 ms budget it is disabled rather than racing the absolute deadline.
-
-The original Commit-3 probe used only `request.setTimeout()`. C5 testing showed black-holed TCP attempts lasting about 7.8 seconds despite the advertised 2000 ms setting. That Node API is useful for connected-socket inactivity but did not impose the required whole-request deadline on the measured connect path. The independent deadline is therefore a hardware-derived correction, not a theoretical cleanup.
-
-Example corrected summary shape:
-
-```text
-summary
-standby_failure_mode=EPROBEDEADLINE
-standby_probe_latency_ms=2002.2
-standby_failure_connected=false
-standby_detection_ms=121657
-wake_to_http_ready_ms=53711
-```
-
-Interpretation:
-
-- `EPROBEDEADLINE` means the whole probe exceeded the configured wall-clock budget.
-- `ESOCKETTIMEDOUT` means a socket that existed became inactive before the absolute deadline.
-- `connected=true|false` is independent evidence and must be interpreted separately from the errno. C5 cycle 3, for example, briefly produced `EHOSTDOWN` with `connected=true`; do not turn an errno name into an assumed TCP-state label.
-- `ECONNREFUSED` means the request received a refusal; use the recorded latency and `connected` field rather than inferring more than the result proves.
-- `HTTP_401` means the listener answered but authentication failed; fix the token before interpreting standby behavior.
-- `HTTP_403` means the listener answered but source filtering rejected the measurement host; fix `allowedSources` before interpreting standby behavior.
-- another `HTTP_*` value is an application-level response and must be investigated rather than collapsed into a generic network failure.
-
-`standby_detection_ms` is the completion time of the first failed probe relative to the standby marker; when that probe ends by deadline it includes the probe's own deadline. For the tighter network-transition bound, compare the last successful completion with the reconstructed start time of the first failed probe. `wake_to_http_ready_ms` is measured on the same Mac process and therefore does not depend on TV wall-clock calibration.
-
-### Measured C5 standby/reboot baseline
-
-Two corrected-instrument runs reproduced the same lifecycle on the tested C5/firmware:
+Two corrected runs reproduced this mode:
 
 | Measurement | Corrected cycle 2 | Corrected cycle 3 |
 | --- | ---: | ---: |
 | Standby -> network-unavailable transition | `>119.297 s`, `<=119.787 s` | `>119.172 s`, `<=119.655 s` |
 | First failed probe | `EPROBEDEADLINE`, `connected=false` | `EPROBEDEADLINE`, `connected=false` |
 | Wake -> HTTP-ready observation window | `>54.328 s`, `<=54.830 s` | `>53.180 s`, `<=53.682 s` |
-| Wake -> first completed authenticated HTTP 200 | `54.877 s` | `53.711 s` |
+| Wake -> completed authenticated HTTP 200 | `54.877 s` | `53.711 s` |
 
-The two standby-transition windows overlap and sit just below 120 seconds. That is **highly repeatable on this tested C5/firmware and consistent with a fixed approximately-120-second platform timer**, but two corrected runs are not evidence for a webOS-wide constant.
+The Mac was continuously issuing authenticated `/status` probes at 500 ms cadence during these experiments and the TV still entered the unavailable/reboot mode. **Ordinary active inbound TCP/HTTP polling therefore did not hold this mode awake.** This rules out the most obvious explanation for the later reachable mode.
 
-The deep transition is a real kernel/system reboot, not merely a HomeBack service restart. `/proc/uptime` reset, and after wake HomeBack injected fresh input targets rather than adopting the pre-standby processes.
+In these earlier cycles `/proc/uptime` reset and HomeBack came back with fresh injected targets, proving a real kernel/system reboot rather than only a HomeBack process restart.
 
-Boot-relative TV evidence was also reproducible:
+Boot-relative observations after those wake cycles were also similar:
 
-- cycle 2: HomeBack autostart worker at uptime `61.50 s`, HTTP already listening at `61.51 s`, remote input verified at `66.55 s`;
-- cycle 3: HomeBack autostart worker at uptime `60.05 s`, HTTP already listening at `60.06 s`, remote input verified at `67.42 s`.
+- cycle 2: HomeBack worker about `61.50 s` uptime, HTTP listening by `61.51 s`, remote input verified by `66.55 s`;
+- cycle 3: worker about `60.05 s`, HTTP listening by `60.06 s`, remote input verified by `67.42 s`.
 
-These uptime values are TV-kernel durations only. Do not combine them with a Mac wake marker by subtracting `/proc/uptime` from the TV's wall-clock `date`.
+These measurements establish an approximately-120-second unavailable/reboot behavior **for those cycles only**. They are not a universal C5 timer and not a webOS-wide constant.
+
+### Observed lifecycle mode B — listener remains reachable for minutes
+
+A later session on the same C5 did not reproduce the unavailable state:
+
+- a precisely scheduled real HA event at about **+30 s** after the physical standby mark returned HA API 200 and HomeBack HTTP 200 with `done:true`, `suppressed:false`, `cameraRegistered:true`;
+- a request at about **+135 s** also returned HomeBack HTTP 200;
+- an isolated run with no earlier notification activity sent its first event at about **+180 s** and again returned HomeBack HTTP 200 with `cameraRegistered:true`;
+- after the isolated +180 s run, `/proc/uptime` and the boot ID showed the TV had remained on the same kernel boot throughout that standby interval;
+- a corrected high-rate authenticated `/status` experiment also stayed HTTP 200 for roughly 337 s, but that particular log did not contain a machine-recorded standby marker, so it is only supporting continuous-availability evidence rather than an exact post-standby duration.
+
+The +180 s isolated result disproves the idea that the earlier +30 s notification was the sole reason the listener stayed alive. Combined with mode A's continuous 500 ms polling, ordinary inbound HomeBack traffic is not sufficient to explain the mode difference.
+
+**Conclusion:** the tested C5 exhibits at least two standby lifecycle behaviors, or behavior controlled by platform state that was not identified. Quick Start+ is one variable worth recording in future tests, but no causal claim is made without a controlled setting change that reproduces the difference.
 
 ### Clock-domain rule
 
-Mac/TV midpoint calibration showed a sharper rule than simply calling the TV clock unreliable: **the TV wall clock was stable within a boot session and discontinuous across boots**.
+The TV wall clock was stable within a boot session and discontinuous across boots. Cycle 2 post-reboot and cycle 3 pre-reboot offsets were about `-1592.5 ms` and `-1591.5 ms`; cycle 3's reboot changed the offset to about `-2573.5 ms`. An earlier cross-boot reconstruction even implied a boot before the recorded wake press, demonstrating why `TV date - uptime` cannot be used as a cross-host boot epoch.
 
-For example, cycle 2 post-reboot and cycle 3 pre-reboot best offsets were about `-1592.5 ms` and `-1591.5 ms`, only 1 ms apart across many minutes. Cycle 3's reboot then changed the best offset to about `-2573.5 ms`, a roughly 982 ms step. An earlier cross-boot reconstruction even implied a kernel boot about 8.3 seconds *before* the recorded wake press, an impossible result that exposed the clock step.
+Use Mac monotonic/wall-clock timing for Mac markers and probe intervals, and TV kernel uptime for TV boot-relative durations. Do not combine them across a reboot unless the relevant clock step is directly measured.
 
-Per-boot calibration can therefore be useful. Cross-boot wall-clock correlation is not valid unless the relevant clock step is directly measured through the transition.
+## Real Home Assistant ingress gates
 
-## Home Assistant HTTP gates
+### HA -> `/status`
 
-After the listener lifecycle is understood, validate from the real HA environment rather than only from a laptop.
+A real Home Assistant `rest_command.homeback_status` call returned HTTP 200 with:
 
-### 1. HA -> `/status`
+```json
+{"ok":true,"version":"0.5.0"}
+```
 
-Configure the README `rest_command.homeback_status` example and invoke it from Home Assistant.
+This was repeated after final HA-only source restriction was applied.
 
-PASS requires an authenticated HTTP 200 response from the HA host with the intended `allowedSources` rule in place.
+### HA -> passive Preview notification
 
-### 2. HA -> passive notification
+A real HA `rest_command` notification returned HTTP 200 with `done:true`, `suppressed:false`, `cameraRegistered:true`. The native toast appeared on the TV and the Cameras entry/icon path was verified.
 
-Invoke `rest_command.homeback_preview` with a text-only request first.
+### Five-event burst / newest wins
 
-PASS requires:
+Five same-camera HA events were sent close enough to exercise the suppression window. Exactly one toast was observed, and the resulting camera entry reflected event 5/newest media.
 
-- HA reports the request as delivered;
-- HomeBack returns a successful response;
-- the TV shows one native passive toast;
-- the underlying app retains D-pad/input ownership as previously validated for the TV-side Luna path.
+The hardware claim is therefore **one visible toast + newest registry event**. CI/unit coverage separately proves the exact five-concurrent response split of one unsuppressed and four suppressed calls with one native sender attempt.
 
-Do not generalize toast placement/branding beyond the tested C5 firmware.
+## TV -> Home Assistant media
 
-### 3. Burst/newest-wins over real HTTP ingress
+Notification delivery is HA -> TV, but Preview media is fetched TV -> HA. Test both directions separately.
 
-Send five same-camera events close enough to fall inside the five-second suppression window, with distinguishable event text/media URLs.
+### Ordinary static JPEG
 
-PASS requires:
+The TV fetched an HA-hosted `/local/homeback-test.jpg` successfully as JPEG, and HomeBack rendered it. In a later cold-open differential, the same class of ordinary HA `/local/*.jpg` media rendered on the **first** Preview activation.
 
-- one native toast attempt/visible toast for the burst;
-- later burst members are suppressed;
-- Recent Cameras contains one camera entry;
-- that entry reflects the newest event/media reference.
+### Synthetic FFmpeg camera proxy
 
-The orchestration-layer CI test already proves the synchronous reservation invariant with five truly concurrent calls. This hardware gate proves the packaged HTTP ingress reaches the same behavior on the TV.
+The real HA synthetic FFmpeg camera used the normal Home Assistant camera proxy/token mechanism. A current `camera_proxy_stream` URL was directly reachable from the TV and returned multipart video data. HomeBack rendered moving frames.
 
-## TV -> Home Assistant media gates
+The initial unconstrained synthetic source was excessively heavy and produced slow/black startup observations. After constraining the synthetic camera to roughly 640x360 at 5 fps, the toast was prompt, the rendered live video was visually smooth/high-frame-rate, and no stalling was observed. Do not document the original extreme-source behavior as a HomeBack product limitation.
 
-Notification delivery and preview media use opposite network directions. HTTP success from HA -> TV does not prove the TV can fetch HA media.
+A direct A/B then produced:
 
-### 1. Static JPEG
+| Media source | First Preview activation | Second activation |
+| --- | --- | --- |
+| packaged `file://` PNG | renders | renders |
+| HA ordinary `/local/*.jpg` | renders | renders |
+| HA synthetic-camera `camera_proxy` JPEG | blank/white | renders static image |
+| HA synthetic-camera `camera_proxy_stream` | blank/white | renders moving video |
 
-Serve or expose a stable JPEG URL from the HA-side network that the TV can reach. Send that URL through `homeback_preview` and open Recent Cameras.
+The local-file and ordinary-HTTP controls show that HomeBack's cold Preview surface and generic WAM remote HTTP image loading can render on first activation. Both proxy variants shared the first-open blank on this synthetic FFmpeg camera. The exact proxy/FFmpeg warm-up mechanism was **not directly timed**, so keep the conclusion at that level of isolation rather than claiming a measured FFmpeg spin-up duration.
 
-PASS requires the interactive preview to load the image on the TV.
+This is integration guidance, not evidence for a HomeBack source-code change.
 
-### 2. `camera_proxy_stream`
+## Recommended Home Assistant media recipe
 
-Repeat using a real current Home Assistant `camera_proxy_stream` or integration-provided signed/proxied URL.
+For short notification previews, the documented default should use a Home Assistant snapshot written to `/config/www/homeback/<camera>.jpg`, then pass its `/local/homeback/<camera>.jpg` URL to HomeBack. This path was the remote-media path proven to render on first activation and it avoids camera-proxy token lifetime/warm-up behavior.
+
+### Static-route prerequisite
+
+Home Assistant only registers `/config/www` as `/local/` after the `www` directory exists at startup. If `/config/www` does not already exist, create the directory **before** starting/restarting HA:
+
+```sh
+mkdir -p /config/www/homeback
+```
+
+If `www` was created for the first time while HA was already running, restart Home Assistant once before testing `/local/`. Home Assistant's `www` directory is writable by `camera.snapshot` without an additional `allowlist_external_dirs` entry under current core defaults.
+
+After a snapshot exists, verify the route with a real GET rather than relying on HEAD:
+
+```sh
+curl -sS -o /dev/null \
+  -w 'http=%{http_code} bytes=%{size_download} type=%{content_type}\n' \
+  http://HA-IP:8123/local/homeback/front_door.jpg
+```
+
+Require HTTP 200, non-zero bytes and an image content type before diagnosing HomeBack.
+
+### Security and mutable-file semantics
+
+Files under `/config/www` are served through `/local/` **without Home Assistant authentication**. A snapshot is therefore fetchable by any client that can reach the HA HTTP endpoint and knows or guesses the URL until that file is overwritten or removed. If the HA HTTP endpoint is reachable beyond the LAN, the exposure boundary is broader than the LAN as well.
+
+Use one stable file **per camera**, for example `front_door.jpg` and `driveway.jpg`, and overwrite it on each event rather than accumulating timestamped unauthenticated files. Add a query-string cache buster to the URL sent to HomeBack.
+
+The query string makes each registered URL distinct for caching purposes but does **not** make the underlying file immutable. Recent Cameras therefore shows the latest contents of **that camera's** snapshot file when opened later, not a guaranteed archival copy of the frame that originally produced the toast. With multiple cameras, each registry entry independently points at its own mutable per-camera file.
+
+That behavior aligns with HomeBack's newest-wins design but is a different guarantee from event-image archival.
+
+### Live-motion option
+
+Users who prefer live motion can opt into a current `camera_proxy_stream` or integration-specific signed/proxied URL. On the tested synthetic FFmpeg path, live video was smooth once warm, but first activation was blank while the second rendered. Other real camera integrations such as Frigate/Reolink were not tested and must not be assumed to share that behavior.
+
+A Home Assistant automation may also deliberately prime its camera/proxy before sending the HomeBack event if its integration has a known cold-start path. That is HA/integration-side mitigation; HomeBack intentionally does not store camera credentials or queue/replay stale notifications.
+
+## Camera-token lifetime — issue #21
+
+The same fixed synthetic-camera access token was measured as:
+
+```text
+~2 s    HTTP 200
+~62 s   HTTP 200
+~183 s  HTTP 200
+~302 s  HTTP 200
+~600 s  HTTP 403
+```
+
+The exact expiry instant was not measured. The important HomeBack result is that its 120 s Recent Cameras lifetime expired first by a large margin in this run. HA Core restart immediately changed the old fixed token from 200 to 403.
+
+Do not persist tokenized/signed camera URLs across reboot or add long-lived HA credentials to HomeBack solely to refresh them. The recommended `/local/` snapshot recipe avoids this token dependency entirely; issue #21 remains the record for optional proxy/token-based media behavior.
+
+## TV-off and no-replay semantics
+
+HomeBack intentionally has no notification backlog. HTTP 200 means the event was accepted while HomeBack was reachable; it does not prove a person saw it and does not make the event durable.
+
+A grace-window HA event at about +30 s was accepted with HTTP 200. In that experiment no stale toast/preview appeared after wake, but the event was already older than the 120 s Recent Cameras TTL by the planned wake time, so that observation alone is TTL/reboot-confounded. The direct `restartService` test separately proves the underlying process-local registry is erased on service restart well inside TTL.
+
+The later +135 s and isolated +180 s requests were also accepted, so those runs never reached deep-off/unavailable state. Therefore the requested real-HA **deep-off drop** case is recorded as **NOT REPRODUCED in the later session**, not PASS/FAIL. The earlier corrected lifecycle cycles independently prove that an unavailable/reboot mode exists.
+
+No queue/replay behavior is added to compensate for either lifecycle mode. If HA retry logic is configured externally, it must avoid turning old detections into stale alerts when HomeBack later becomes reachable.
+
+## Evidence checklist for future hardware
 
 Record:
 
-- exact URL form with secrets/token values redacted;
-- whether the TV can reach it directly;
-- time between URL generation and preview open;
-- whether HA restart or token rotation invalidates the URL.
-
-### 3. Delayed-token behavior — issue #21
-
-Deliberately delay opening the recent camera event and test near/after the observed HA URL lifetime.
-
-Do not change HomeBack's two-minute recent-event window based on assumption. Issue #21 remains open until the real signed/proxied URL lifecycle is measured.
-
-## TV-off and Recent Cameras semantics
-
-HomeBack intentionally has no notification backlog. Camera notifications are designed for a TV that is **already on**.
-
-On the tested C5, manually waking a sleeping TV is not a viable workaround for a real-time doorbell event: authenticated HTTP did not return until about 53-55 seconds after the wake marker in the two corrected runs. Queuing such a detection would turn it into a stale alert roughly a minute later, so HomeBack continues to fail/drop unavailable-TV events rather than replay them.
-
-`PreviewNotificationState.recentCameras` is intentionally volatile in-memory state. A kernel/service restart clears it. Do not persist signed Home Assistant media URLs merely to survive reboot while issue #21 has not established that those URLs remain useful or safe after the restart.
-
-The approximately-120-second standby grace period has a separate edge case: while the listener is still reachable, HA can receive HTTP 200 and `cameraRegistered: true` for an event accepted by HomeBack even though the subsequent reboot will erase that in-memory Recent Cameras entry. **HTTP 200 means the event was accepted while HomeBack was reachable; it does not prove a person saw the toast, and it does not make the event durable.**
-
-Validate both off-TV cases with real HA ingress:
-
-1. **Grace-window acceptance:** send a distinguishable event around 30 seconds after standby, confirm HTTP 200 / `cameraRegistered: true`, then allow deep standby to reboot the TV. After wake, verify that event is absent from Recent Cameras and is not replayed.
-2. **Deep-off drop:** send a distinguishable event after the listener is unavailable. The HA request must fail, and the event must not appear or replay after wake.
-
-If Home Assistant automation logic is later changed to retry requests, that retry policy must preserve the same no-stale-alert requirement.
-
-## Evidence to record in issue #22
-
-For the final hardware audit, record:
-
-- exact candidate commit SHA;
+- exact candidate/runtime commit SHA and any docs-only head separately;
 - TV model, SDK and firmware;
-- Home Assistant version and deployment type;
-- HTTP config with token redacted;
-- `/remote/status` including `httpConfigLoaded` and the other HTTP fields;
-- listener after service start: PASS/FAIL;
-- service restart restores listener: PASS/FAIL;
-- app-only restart behavior and any interruption;
-- corrected standby failure mode, latency and `connected` state;
-- standby transition bounds for each corrected run;
-- wake-to-HTTP-ready time for each corrected run;
-- per-boot clock calibration when cross-host timestamps are being compared;
-- HA -> `/status`: PASS/FAIL;
-- HA -> passive notification: PASS/FAIL;
-- burst/newest-wins over HTTP: PASS/FAIL;
-- TV -> HA static JPEG: PASS/FAIL;
-- TV -> HA `camera_proxy_stream`: PASS/FAIL;
-- grace-window accepted-event/no-replay result;
-- deep-off drop/no-replay result;
-- delayed/expired-token result with issue #21 reference;
-- any deviations from the single-C5 baseline.
+- Home Assistant version/deployment type when available;
+- LG power settings, including **Quick Start+ state when known**, without assuming causality;
+- HTTP config with bearer token redacted;
+- `/remote/status` including `httpConfigLoaded` and all HTTP fields;
+- listener start/restart behavior;
+- app-only restart behavior and probe resolution;
+- source-filter positive/negative checks;
+- standby probe cadence, failure mode, absolute latency and `connected` state;
+- whether continuous traffic was present during standby testing;
+- standby transition bounds and whether `/proc/uptime`/boot ID prove reboot or same-kernel behavior;
+- wake-to-HTTP-ready timing only when the unavailable/reboot mode actually occurs;
+- per-boot clock calibration when comparing host timestamps;
+- HA -> `/status` and passive notification results;
+- burst/newest-wins result, distinguishing visible hardware behavior from CI response-count proof;
+- TV -> HA ordinary static JPEG;
+- snapshot and live proxy behavior, including first-open/warm-open differences;
+- token lifetime and HA-restart invalidation if tokenized media is used;
+- direct Recent Cameras volatility result;
+- grace-window/no-replay observations;
+- deep-off drop only if the listener actually becomes unavailable;
+- any deviations from this single-C5 baseline.
 
-Keep hardware-proven facts separate from CI-proven facts and from behavior that remains untested.
+Keep **hardware-proven**, **CI-proven**, **characterised/inferred**, and **not reproduced/untested** claims explicitly separate.
