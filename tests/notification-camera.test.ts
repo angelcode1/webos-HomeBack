@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { cameraToPreviewPayload } from '../packages/app/src/shared/services/camera/camera.lib.ts';
@@ -14,7 +15,7 @@ import {
 
 const TEST_SERVICE_ID = 'com.homebrew.homeback.service';
 
-test('passive camera toast uses the compact webOS light type, service identity and bounded message', () => {
+test('passive camera toast uses the compact webOS light type, camera icon, service identity and bounded message', () => {
 	const toast = buildPreviewToastRequest({
 		title: 'Front Door',
 		message: 'Person detected '.repeat(10),
@@ -23,7 +24,20 @@ test('passive camera toast uses the compact webOS light type, service identity a
 	assert.equal(toast.type, 'light');
 	assert.equal(Array.from(toast.message).length <= 60, true);
 	assert.equal(toast.sourceId, TEST_SERVICE_ID);
-	assert.equal('iconUrl' in toast, false);
+	assert.equal(
+		toast.iconUrl,
+		'file:///media/developer/apps/usr/palm/applications/com.homebrew.homeback/camera-toast-icon.png',
+	);
+});
+
+test('camera toast icon asset is the webOS-required 80x80 PNG', () => {
+	const icon = readFileSync(new URL(
+		'../packages/app/manifests/camera-toast-icon.png',
+		import.meta.url,
+	));
+	assert.deepEqual([...icon.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+	assert.equal(icon.readUInt32BE(16), 80);
+	assert.equal(icon.readUInt32BE(20), 80);
 });
 
 test('toast title budget preserves event text when the friendly name is very long', () => {
