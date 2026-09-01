@@ -67,7 +67,6 @@ export class AppManagerProvider implements LaunchPointsProvider {
 		if ('launchPoints' in message) {
 			const generation = ++this.generation;
 			this.iconRevision.clear();
-			// Discard stale full-refresh work before queueing the new generation.
 			this.iconQueue.length = 0;
 
 			const raw = message.launchPoints.filter(
@@ -164,14 +163,10 @@ export class AppManagerProvider implements LaunchPointsProvider {
 			}
 
 			runInAction(() => {
-				const index = this.launchPoints.findIndex(
+				const current = this.launchPoints.find(
 					lp => lp.launchPointId === snapshot.launchPointId,
 				);
-				if (index < 0) return;
-				this.launchPoints[index] = {
-					...this.launchPoints[index],
-					icon: response.dataUrl!,
-				};
+				if (current) current.icon = response.dataUrl!;
 			});
 		} catch (error) {
 			if (__DEV__) console.warn(`Unable to hydrate icon for ${snapshot.id}:`, error);
