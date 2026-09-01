@@ -14,7 +14,7 @@ import {
 
 const TEST_SERVICE_ID = 'com.homebrew.homeback.service';
 
-test('passive camera toast uses the compact webOS light type, service identity and bounded message', () => {
+test('passive camera toast uses the compact webOS light type, camera icon, service identity and bounded message', () => {
 	const toast = buildPreviewToastRequest({
 		title: 'Front Door',
 		message: 'Person detected '.repeat(10),
@@ -23,7 +23,10 @@ test('passive camera toast uses the compact webOS light type, service identity a
 	assert.equal(toast.type, 'light');
 	assert.equal(Array.from(toast.message).length <= 60, true);
 	assert.equal(toast.sourceId, TEST_SERVICE_ID);
-	assert.equal('iconUrl' in toast, false);
+	assert.equal(
+		toast.iconUrl,
+		'file:///media/developer/apps/usr/palm/applications/com.homebrew.homeback/camera-toast-icon.png',
+	);
 });
 
 test('toast title budget preserves event text when the friendly name is very long', () => {
