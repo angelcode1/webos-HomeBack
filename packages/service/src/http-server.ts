@@ -6,7 +6,7 @@ import { dirname } from 'path';
 
 import { isPlainObject } from '@homeback/utils';
 
-import { HOME_BACK_CONFIG_DIR } from './homeback-paths';
+import { HOME_BACK_CONFIG_DIR } from './homeback-paths.ts';
 import type { PreviewNotificationRequest } from './notification';
 import type { PreviewNotificationResult } from './preview-notification-service';
 
