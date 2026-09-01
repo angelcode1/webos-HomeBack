@@ -1,54 +1,40 @@
-import { spawn } from 'child_process';
-import type { ChildProcess } from 'child_process';
 import {
 	closeSync,
 	constants as fsConstants,
 	existsSync,
-	fchmodSync,
 	fstatSync,
-	ftruncateSync,
 	openSync,
 	promises as fs,
-	writeFileSync,
 } from 'fs';
-import { basename, dirname, join } from 'path';
+import { dirname, join } from 'path';
+
+import { isPlainObject } from '@homeback/utils';
 
 import type { Service } from './bus';
 import { CoalescedTask } from './coalesced-task';
-import { SERVICE_ID, SERVICE_ROOT_DIR } from './environment';
-import { EventLogTailer, MAX_LOG_BYTES } from './event-log-tailer';
+import { SERVICE_ROOT_DIR } from './environment';
+import { EventLogTailer } from './event-log-tailer';
+import { HOME_BACK_CONFIG_DIR } from './homeback-paths';
+import { InjectionManager } from './remote-injection-manager';
+import { ESSENTIAL_TARGET_NAMES } from './remote-input-lifecycle';
+import { hasVerifiedNativeOwnership } from './remote-input-ownership';
+import { NativeConfigWriter } from './native-config-writer';
 import { RemoteActionRunner } from './remote-action-runner';
-import { parseProcStatStartTime } from './remote-process';
 import {
-	buildNativeKeybinds,
-	isTimedMapping,
 	type RemoteConfig,
 	type RemoteMapping,
-	type TimedMapping,
 	validateConfig,
 } from './remote-config';
-import {
-	BLOCKED_RECHECK_MS,
-	ESSENTIAL_TARGET_NAMES,
-	injectionRetryDelayMs,
-	MAX_INJECTION_FAILURES,
-} from './remote-input-lifecycle';
-import {
-	findMappedLibraryPath,
-	hasVerifiedNativeOwnership,
-	isHomeBackMappedLibraryPath,
-	normalizeMappedLibraryPath,
-} from './remote-input-ownership';
+import { RemotePressStateMachine } from './remote-press-state-machine';
+import { ProcessScanner, type ProcTargetSnapshot } from './remote-process-scanner';
 import { writeFile } from './utils';
 
-const HOME_BACK_CONFIG_DIR = '/home/root/.config/homeback';
 export const REMOTE_CONFIG_PATH = `${HOME_BACK_CONFIG_DIR}/remote-buttons.json`;
 const NATIVE_CONFIG_PATH = '/home/root/.config/lginputhook/keybinds.json';
 const DEFAULT_CONFIG_PATH = join(SERVICE_ROOT_DIR, 'inputhook', 'remote-buttons.default.json');
 const EZINJECT_PATH = join(SERVICE_ROOT_DIR, 'inputhook', 'ezinject');
 const INPUTHOOK_LIBRARY_PATH = join(SERVICE_ROOT_DIR, 'inputhook', 'libinputhookpp.so');
 
-// @invariant: essential-native-ownership
 const TARGET_NAMES = new Set([...ESSENTIAL_TARGET_NAMES, 'tvservice']);
 const LEGACY_SERVICE_ID = 'org.webosbrew.inputhook.service';
 const LEGACY_SERVICE_DIRS = [
@@ -60,103 +46,6 @@ const LOG_POLL_MS = 80;
 const PROCESS_SCAN_MS = 2_000;
 const CONFIG_SCAN_MS = 1_000;
 const DEFAULT_LONG_PRESS_MS = 650;
-const ACTION_COOLDOWN_MS = 150;
-const MAX_STUCK_PRESS_GRACE_MS = 5_000;
-const INJECTION_VERIFY_DELAY_MS = 150;
-const INJECTION_VERIFY_ATTEMPTS = 10;
-const INJECTION_WATCHDOG_MS = 15_000;
-
-type ActivePress = {
-	mapping: TimedMapping;
-	startedAtMs: number;
-	longFired: boolean;
-	longTimer: NodeJS.Timeout | null;
-	watchdogTimer: NodeJS.Timeout | null;
-};
-
-type LastRemoteKeyEvent = {
-	keycode: number;
-	state: number;
-	atMs: number;
-};
-
-type TargetSource = 'injected' | 'adopted';
-
-type InjectedTarget = {
-	pid: number;
-	name: string;
-	startTimeTicks: string;
-	logPath: string;
-	injectorLogPath: string;
-	hookPath: string;
-	state: 'injecting' | 'active';
-	source: TargetSource;
-	injectionWatchdog: NodeJS.Timeout | null;
-	injector: ChildProcess | null;
-};
-
-type BlockedHookReason =
-	| 'foreign-hook'
-	| 'homeback-log-missing'
-	| 'injection-failed'
-	| 'proc-maps-unreadable';
-
-type BlockedHook = {
-	pid: number;
-	name: string;
-	startTimeTicks: string;
-	hookPath: string;
-	reason: BlockedHookReason;
-	recovery: string;
-	failures?: number;
-	firstBlockedAt: number;
-	lastCheckedAt: number;
-	nextRecheckAt: number;
-};
-
-type InjectionFailure = {
-	name: string;
-	startTimeTicks: string;
-	failures: number;
-	nextAttemptAt: number;
-	lastError: string;
-};
-
-type ProcTargetSnapshot = {
-	pid: number;
-	name: string;
-	startTimeTicks: string;
-	mapsReadable: boolean;
-	mappedHookPath: string | null;
-};
-
-type HookInspection = Pick<ProcTargetSnapshot, 'mapsReadable' | 'mappedHookPath'>;
-type TargetIdentity = Pick<ProcTargetSnapshot, 'pid' | 'name' | 'startTimeTicks'>;
-
-const serializeNativeConfig = (config: RemoteConfig, timedMappingsArmed: boolean): string =>
-	`${JSON.stringify(buildNativeKeybinds(config, timedMappingsArmed), null, '\t')}\n`;
-
-const actionThreshold = (mapping: TimedMapping, config: RemoteConfig): number =>
-	mapping.longPressMs ?? config.defaultLongPressMs ?? DEFAULT_LONG_PRESS_MS;
-
-// @invariant: nofollow-log-permissions
-const createFreshLogFile = (path: string): number => {
-	const fd = openSync(
-		path,
-		fsConstants.O_RDWR |
-			fsConstants.O_CREAT |
-			fsConstants.O_TRUNC |
-			fsConstants.O_NOFOLLOW,
-		0o600,
-	);
-	try {
-		fchmodSync(fd, 0o600);
-		return fd;
-	} catch (error) {
-		closeSync(fd);
-		throw error;
-	}
-};
 
 const configFingerprint = (stat: { mtimeMs: number; size: number; ino: number }): string =>
 	`${stat.mtimeMs}:${stat.size}:${stat.ino}`;
@@ -166,31 +55,29 @@ export class RemoteInputManager {
 	private configFingerprint = '';
 	private rejectedConfigFingerprint = '';
 	private started = false;
-	private timedMappingsArmed = false;
 	private eventTailerHealthy = false;
-	private readonly targets = new Map<number, InjectedTarget>();
-	private readonly blockedHooks = new Map<number, BlockedHook>();
-	private readonly injectionFailures = new Map<number, InjectionFailure>();
 	private readonly lastObservedTargets = new Map<number, ProcTargetSnapshot>();
-	private readonly processNameCache = new Map<number, string>();
 	private readonly legacyPids = new Set<number>();
 	private legacyMode = false;
 	private readonly logTailer: EventLogTailer;
 	private readonly actionRunner: RemoteActionRunner;
-	private readonly activePresses = new Map<number, ActivePress>();
-	private readonly lastActionAt = new Map<number, number>();
-	private lastKeyEvent: LastRemoteKeyEvent | null = null;
+	private readonly pressState: RemotePressStateMachine;
+	private readonly scanner: ProcessScanner;
+	private readonly injectionManager: InjectionManager;
+	private readonly nativeConfigWriter: NativeConfigWriter;
 	private logTimer: NodeJS.Timeout | null = null;
 	private processTimer: NodeJS.Timeout | null = null;
 	private configTimer: NodeJS.Timeout | null = null;
 	private startPromise: Promise<void> | null = null;
-	private nativeConfigWriteTail: Promise<void> = Promise.resolve();
 	private readonly processScans: CoalescedTask<void>;
 	private readonly configReloads: CoalescedTask<boolean>;
 
-	public constructor(private readonly service: Service) {
+	public constructor(service: Service) {
 		this.logTailer = new EventLogTailer();
 		this.actionRunner = new RemoteActionRunner(service);
+		this.pressState = new RemotePressStateMachine(() => this.config, this.actionRunner);
+		this.scanner = new ProcessScanner(TARGET_NAMES, INPUTHOOK_LIBRARY_PATH);
+		this.nativeConfigWriter = new NativeConfigWriter(NATIVE_CONFIG_PATH);
 		this.processScans = new CoalescedTask<void>(
 			() => this.scanProcessesOnce(),
 			() => undefined,
@@ -198,6 +85,14 @@ export class RemoteInputManager {
 		this.configReloads = new CoalescedTask<boolean>(
 			force => this.reloadConfigOnce(force),
 			(current, incoming) => current || incoming,
+		);
+		this.injectionManager = new InjectionManager(
+			this.scanner,
+			this.logTailer,
+			INPUTHOOK_LIBRARY_PATH,
+			EZINJECT_PATH,
+			() => this.requestProcessScan(),
+			() => this.syncTimedMappingsArmed(),
 		);
 	}
 
@@ -230,35 +125,27 @@ export class RemoteInputManager {
 		this.configTimer = null;
 		this.started = false;
 		this.eventTailerHealthy = false;
+		this.pressState.stop();
 
-		for (const [keycode, active] of [...this.activePresses.entries()]) {
-			this.clearActivePress(keycode, active);
-		}
-
-		await this.setTimedMappingsArmed(false);
+		await this.nativeConfigWriter.setArmed(this.config, false);
 		this.logTailer.closeAll();
 	}
 
 	/**
 	 * Last-resort synchronous exit hook. This cannot protect against SIGKILL or
-	 * power loss, but it covers normal process.exit, handled signals and most
-	 * JavaScript crashes without leaving service-dependent native ignores behind.
+	 * power loss, but it atomically replaces the native config on normal exit,
+	 * handled signals and most JavaScript crashes.
 	 */
 	public disarmTimedMappingsSync(): void {
 		try {
-			writeFileSync(
-				NATIVE_CONFIG_PATH,
-				serializeNativeConfig(this.config, false),
-				{ encoding: 'utf8', mode: 0o644 },
-			);
-			this.timedMappingsArmed = false;
+			this.nativeConfigWriter.disarmSync(this.config);
 		} catch (error) {
 			console.error('Unable to synchronously disarm HomeBack timed remote mappings:', error);
 		}
 	}
 
 	public status(): Record<string, unknown> {
-		const mappedLegacyPids = [...this.blockedHooks.values()]
+		const mappedLegacyPids = [...this.injectionManager.blockedHooks.values()]
 			.filter(target => target.hookPath.includes(`/${LEGACY_SERVICE_ID}/`))
 			.map(target => target.pid);
 		const legacyPids = [...new Set([...this.legacyPids, ...mappedLegacyPids])];
@@ -267,16 +154,16 @@ export class RemoteInputManager {
 			started: this.started,
 			configPath: REMOTE_CONFIG_PATH,
 			nativeConfigPath: NATIVE_CONFIG_PATH,
-			timedMappingsArmed: this.timedMappingsArmed,
+			timedMappingsArmed: this.nativeConfigWriter.timedMappingsArmed,
 			eventTailerHealthy: this.eventTailerHealthy,
-			injected: [...this.targets.values()]
+			injected: [...this.injectionManager.targets.values()]
 				.filter(target => target.state === 'active')
 				.map(({ pid, name, source }) => ({ pid, name, source })),
-			injecting: [...this.targets.values()]
+			injecting: [...this.injectionManager.targets.values()]
 				.filter(target => target.state === 'injecting')
 				.map(({ pid, name }) => ({ pid, name })),
-			blockedHooks: [...this.blockedHooks.values()],
-			retrying: [...this.injectionFailures.entries()].map(([pid, failure]) => ({
+			blockedHooks: [...this.injectionManager.blockedHooks.values()],
+			retrying: [...this.injectionManager.injectionFailures.entries()].map(([pid, failure]) => ({
 				pid,
 				name: failure.name,
 				failures: failure.failures,
@@ -284,10 +171,10 @@ export class RemoteInputManager {
 				lastError: failure.lastError,
 			})),
 			nativeOwnershipVerified: this.isNativeOwnershipVerified(),
-			activeKeys: [...this.activePresses.keys()],
+			activeKeys: this.pressState.activeKeys,
 			legacyInputHookDetected: this.legacyMode || mappedLegacyPids.length > 0,
 			legacyPids,
-			lastKeyEvent: this.lastKeyEvent,
+			lastKeyEvent: this.pressState.lastKeyEvent,
 			lastAction: this.actionRunner.lastAction,
 			logCursorCount: this.logTailer.size,
 		};
@@ -299,28 +186,26 @@ export class RemoteInputManager {
 			this.legacyMode,
 			ESSENTIAL_TARGET_NAMES,
 			[...this.lastObservedTargets.values()].map(({ pid, name }) => ({ pid, name })),
-			[...this.targets.values()].map(({ pid, name, state }) => ({ pid, name, state })),
-			[...this.blockedHooks.values()].map(({ pid, name }) => ({ pid, name })),
+			[...this.injectionManager.targets.values()].map(({ pid, name, state }) => ({ pid, name, state })),
+			[...this.injectionManager.blockedHooks.values()].map(({ pid, name }) => ({ pid, name })),
 		);
 	}
 
 	private async startOnce(): Promise<void> {
 		await this.ensureConfigFiles();
-		// Timed entries remain absent from the native file until the helper has a
-		// verified hook and a readable event-log path to service the swallow.
 		await this.reloadConfig(true);
 		await fs.chmod(EZINJECT_PATH, 0o755);
 		await this.scanProcesses();
 
 		this.started = true;
 		this.logTimer = setInterval(() => {
-			void this.pollEventLogs();
+			this.runGuarded('Remote event-log poll failed:', () => this.pollEventLogs());
 		}, LOG_POLL_MS);
 		this.processTimer = setInterval(() => {
-			void this.scanProcesses();
+			this.runGuarded('Remote process scan failed:', () => this.scanProcesses());
 		}, PROCESS_SCAN_MS);
 		this.configTimer = setInterval(() => {
-			void this.reloadConfig(false);
+			this.runGuarded('Remote config reload failed:', () => this.reloadConfig(false));
 		}, CONFIG_SCAN_MS);
 		await this.pollEventLogs();
 	}
@@ -337,7 +222,7 @@ export class RemoteInputManager {
 			let merged = defaultsRaw;
 			try {
 				const legacyRaw = JSON.parse(await fs.readFile(NATIVE_CONFIG_PATH, 'utf8')) as unknown;
-				if (legacyRaw && typeof legacyRaw === 'object' && !Array.isArray(legacyRaw)) {
+				if (isPlainObject(legacyRaw)) {
 					const candidate: RemoteConfig = {
 						...defaultsRaw,
 						keys: {
@@ -364,9 +249,8 @@ export class RemoteInputManager {
 		}
 		await fs.chmod(REMOTE_CONFIG_PATH, 0o600);
 
-		// @invariant: native-config-startup-disarm
-		// Preserve a legacy native file long enough for the migration above, then always
-		// clear service-dependent swallows before reloadConfig(true) can reject startup.
+		// Preserve a legacy native file long enough for the migration above, then
+		// clear service-dependent swallows before a forced reload can reject startup.
 		await writeFile(NATIVE_CONFIG_PATH, '{}\n', 0o644);
 	}
 
@@ -399,7 +283,7 @@ export class RemoteInputManager {
 			const parsed = JSON.parse(await fs.readFile(REMOTE_CONFIG_PATH, 'utf8')) as unknown;
 			if (!validateConfig(parsed)) throw new Error('Invalid remote-buttons.json schema');
 
-			await this.writeNativeConfig(parsed, this.timedMappingsArmed);
+			await this.nativeConfigWriter.writeConfig(parsed);
 			this.config = parsed;
 			this.configFingerprint = fingerprint;
 			this.rejectedConfigFingerprint = '';
@@ -411,116 +295,18 @@ export class RemoteInputManager {
 		}
 	}
 
-	private writeNativeConfig(config: RemoteConfig, timedMappingsArmed: boolean): Promise<void> {
-		const serialized = serializeNativeConfig(config, timedMappingsArmed);
-		const run = this.nativeConfigWriteTail.catch(() => undefined).then(async () => {
-			let current = '';
-			try {
-				current = await fs.readFile(NATIVE_CONFIG_PATH, 'utf8');
-			} catch {
-				// Write below.
-			}
-			if (current !== serialized) await writeFile(NATIVE_CONFIG_PATH, serialized, 0o644);
-		});
-		this.nativeConfigWriteTail = run.catch(() => undefined);
-		return run;
-	}
-
-	// @invariant: timed-mapping-fail-safe
-	private async setTimedMappingsArmed(armed: boolean): Promise<void> {
-		if (this.timedMappingsArmed === armed) return;
-		const previous = this.timedMappingsArmed;
-		this.timedMappingsArmed = armed;
-		try {
-			await this.writeNativeConfig(this.config, armed);
-			console.warn(`[HomeBackRemote] timed mappings ${armed ? 'armed' : 'disarmed'}`);
-		} catch (error) {
-			if (this.timedMappingsArmed === armed) this.timedMappingsArmed = previous;
-			throw error;
-		}
-	}
-
 	private async syncTimedMappingsArmed(): Promise<void> {
 		const shouldArm =
 			this.started &&
 			this.eventTailerHealthy &&
 			this.logTailer.size > 0 &&
 			this.isNativeOwnershipVerified();
-		await this.setTimedMappingsArmed(shouldArm);
+		await this.nativeConfigWriter.setArmed(this.config, shouldArm);
 	}
 
 	private async pollEventLogs(): Promise<void> {
-		this.eventTailerHealthy = this.logTailer.poll(line => this.parseLogLine(line));
-		try {
-			await this.syncTimedMappingsArmed();
-		} catch (error) {
-			console.error('Unable to update fail-safe timed remote mapping state:', error);
-		}
-	}
-
-	// @invariant: single-proc-snapshot
-	private async scanTargetProcesses(): Promise<Map<number, ProcTargetSnapshot> | null> {
-		const targets = new Map<number, ProcTargetSnapshot>();
-		let entries: string[];
-		try {
-			entries = await fs.readdir('/proc');
-		} catch (error) {
-			console.error('Unable to scan /proc for remote input targets:', error);
-			return null;
-		}
-
-		const livePids = new Set<number>();
-		for (const entry of entries) {
-			if (!/^\d+$/.test(entry)) continue;
-			const pid = Number(entry);
-			livePids.add(pid);
-
-			let name = this.processNameCache.get(pid);
-			if (name === undefined) {
-				try {
-					name = (await fs.readFile(`/proc/${entry}/comm`, 'utf8')).trim();
-					this.processNameCache.set(pid, name);
-				} catch {
-					continue;
-				}
-			}
-			if (!TARGET_NAMES.has(name)) continue;
-
-			const startTimeTicks = await this.readProcessStartTime(pid);
-			if (!startTimeTicks) continue;
-			const previousTarget = this.lastObservedTargets.get(pid);
-			if (previousTarget && previousTarget.startTimeTicks !== startTimeTicks) {
-				// A PID can be recycled without being absent from two-second snapshots.
-				// Never trust the cached comm across an observed identity change.
-				try {
-					name = (await fs.readFile(`/proc/${entry}/comm`, 'utf8')).trim();
-					this.processNameCache.set(pid, name);
-				} catch {
-					continue;
-				}
-				if (!TARGET_NAMES.has(name)) continue;
-			}
-			const inspection = await this.inspectMappedHook(pid);
-			targets.set(pid, {
-				pid,
-				name,
-				startTimeTicks,
-				...inspection,
-			});
-		}
-
-		for (const pid of [...this.processNameCache.keys()]) {
-			if (!livePids.has(pid)) this.processNameCache.delete(pid);
-		}
-		return targets;
-	}
-
-	private async readProcessStartTime(pid: number): Promise<string | null> {
-		try {
-			return parseProcStatStartTime(await fs.readFile(`/proc/${pid}/stat`, 'utf8'));
-		} catch {
-			return null;
-		}
+		this.eventTailerHealthy = this.logTailer.poll(line => this.pressState.handleLogLine(line));
+		await this.syncTimedMappingsArmed();
 	}
 
 	private async detectLiveLegacyInputHook(
@@ -532,7 +318,7 @@ export class RemoteInputManager {
 
 		for (const target of procTargets.values()) {
 			if (target.mapsReadable && target.mappedHookPath) {
-				if (await this.isHomeBackHookPath(target.mappedHookPath)) continue;
+				if (await this.injectionManager.isHomeBackHookPath(target.mappedHookPath)) continue;
 				if (target.mappedHookPath.includes(`/${LEGACY_SERVICE_ID}/`)) this.legacyPids.add(target.pid);
 				continue;
 			}
@@ -558,7 +344,7 @@ export class RemoteInputManager {
 				const stat = fstatSync(fd);
 				if (!stat.isFile()) throw new Error('legacy event log is not a regular file');
 				this.logTailer.add(path, fd, stat.size, false);
-				fd = null; // ownership transferred to EventLogTailer
+				fd = null;
 				console.log(`Using existing LG Input Hook event log for ${name}`);
 			} catch (error) {
 				if (fd !== null) closeSync(fd);
@@ -589,7 +375,7 @@ export class RemoteInputManager {
 			return false;
 		}
 
-		if (legacyDetected && this.targets.size === 0) {
+		if (legacyDetected && this.injectionManager.targets.size === 0) {
 			this.legacyMode = true;
 			this.attachLegacyLogs();
 			console.log('Standalone LG Input Hook detected; HomeBack will defer injection until it disappears.');
@@ -604,7 +390,7 @@ export class RemoteInputManager {
 	}
 
 	private async scanProcessesOnce(): Promise<void> {
-		const procTargets = await this.scanTargetProcesses();
+		const procTargets = await this.scanner.scan();
 		if (!procTargets) {
 			this.lastObservedTargets.clear();
 			await this.syncTimedMappingsArmed();
@@ -613,555 +399,21 @@ export class RemoteInputManager {
 		this.lastObservedTargets.clear();
 		for (const [pid, target] of procTargets) this.lastObservedTargets.set(pid, target);
 
-		await this.pruneDeadProcessState(procTargets);
 		if (await this.reconcileLegacyMode(procTargets)) {
+			await this.injectionManager.pruneDeadProcessState(procTargets);
 			await this.syncTimedMappingsArmed();
 			return;
 		}
 
-		const now = Date.now();
-		for (const target of procTargets.values()) {
-			const existing = this.targets.get(target.pid);
-			if (existing) {
-				if (existing.startTimeTicks === target.startTimeTicks) continue;
-				await this.cleanupTarget(target.pid);
-			}
-
-			const blocked = this.blockedHooks.get(target.pid);
-			if (blocked) {
-				if (blocked.startTimeTicks !== target.startTimeTicks) {
-					this.blockedHooks.delete(target.pid);
-				} else {
-					if (now >= blocked.nextRecheckAt) await this.recheckBlockedTarget(target, blocked);
-					continue;
-				}
-			}
-
-			const failure = this.injectionFailures.get(target.pid);
-			if (failure) {
-				if (failure.startTimeTicks !== target.startTimeTicks) {
-					this.injectionFailures.delete(target.pid);
-				} else if (now < failure.nextAttemptAt) {
-					continue;
-				}
-			}
-			await this.reconcileTarget(target);
-		}
+		await this.injectionManager.reconcile(procTargets);
 		await this.syncTimedMappingsArmed();
 	}
 
-	private async pruneDeadProcessState(
-		procTargets: ReadonlyMap<number, ProcTargetSnapshot>,
-	): Promise<void> {
-		for (const [pid, existing] of [...this.targets.entries()]) {
-			const live = procTargets.get(pid);
-			if (!live || live.startTimeTicks !== existing.startTimeTicks) await this.cleanupTarget(pid);
-		}
-		for (const [pid, blocked] of [...this.blockedHooks.entries()]) {
-			const live = procTargets.get(pid);
-			if (!live || live.startTimeTicks !== blocked.startTimeTicks) this.blockedHooks.delete(pid);
-		}
-		for (const [pid, failure] of [...this.injectionFailures.entries()]) {
-			const live = procTargets.get(pid);
-			if (!live || live.startTimeTicks !== failure.startTimeTicks) this.injectionFailures.delete(pid);
-		}
+	private requestProcessScan(): void {
+		this.runGuarded('Requested remote process rescan failed:', () => this.scanProcesses());
 	}
 
-	private async reconcileTarget(target: ProcTargetSnapshot): Promise<void> {
-		if (!target.mapsReadable) {
-			const changed = this.blockTarget(
-				target,
-				'',
-				'proc-maps-unreadable',
-				'HomeBack could not inspect /proc/<pid>/maps safely. It will retry automatically; do not force reinjection.',
-			);
-			if (changed) {
-				console.warn(
-					`Deferring remote-hook reconciliation for ${target.name} (${target.pid}): /proc maps could not be read.`,
-				);
-			}
-			return;
-		}
-
-		if (target.mappedHookPath) {
-			await this.handleMappedHook(target, target.mappedHookPath);
-			return;
-		}
-
-		await this.inject(target);
-	}
-
-	// @invariant: blocked-target-recheck
-	private async recheckBlockedTarget(target: ProcTargetSnapshot, blocked: BlockedHook): Promise<void> {
-		blocked.lastCheckedAt = Date.now();
-		blocked.nextRecheckAt = blocked.lastCheckedAt + BLOCKED_RECHECK_MS;
-
-		if (!target.mapsReadable) return;
-
-		if (target.mappedHookPath) {
-			await this.handleMappedHook(target, target.mappedHookPath);
-			return;
-		}
-
-		if (blocked.reason === 'injection-failed') {
-			// Automatic injection retries are deliberately capped. Keep probing /proc so
-			// an externally restored HomeBack mapping can still be adopted safely.
-			return;
-		}
-
-		this.blockedHooks.delete(target.pid);
-		this.injectionFailures.delete(target.pid);
-		await this.inject(target);
-	}
-
-	private async inspectMappedHook(pid: number): Promise<HookInspection> {
-		try {
-			const maps = await fs.readFile(`/proc/${pid}/maps`, 'utf8');
-			return {
-				mapsReadable: true,
-				mappedHookPath: findMappedLibraryPath(maps, basename(INPUTHOOK_LIBRARY_PATH)),
-			};
-		} catch {
-			// Do not treat an unreadable maps file as an unhooked process: that could cause unsafe reinjection.
-			return { mapsReadable: false, mappedHookPath: null };
-		}
-	}
-
-	private blockTarget(
-		target: TargetIdentity,
-		hookPath: string,
-		reason: BlockedHookReason,
-		recovery: string,
-		failures?: number,
-	): boolean {
-		const now = Date.now();
-		const previous = this.blockedHooks.get(target.pid);
-		const sameIdentity = previous?.startTimeTicks === target.startTimeTicks;
-		const changed = !previous || !sameIdentity || previous.reason !== reason || previous.hookPath !== hookPath;
-		this.blockedHooks.set(target.pid, {
-			pid: target.pid,
-			name: target.name,
-			startTimeTicks: target.startTimeTicks,
-			hookPath,
-			reason,
-			recovery,
-			failures,
-			firstBlockedAt: sameIdentity && previous ? previous.firstBlockedAt : now,
-			lastCheckedAt: now,
-			nextRecheckAt: now + BLOCKED_RECHECK_MS,
-		});
-		return changed;
-	}
-
-	private async handleMappedHook(target: ProcTargetSnapshot, mappedHookPath: string): Promise<void> {
-		if (await this.isHomeBackHookPath(mappedHookPath)) {
-			await this.adoptExistingHook(target, mappedHookPath);
-			return;
-		}
-
-		this.injectionFailures.delete(target.pid);
-		const changed = this.blockTarget(
-			target,
-			mappedHookPath,
-			'foreign-hook',
-			'Remove the conflicting input hook and restart the target process (or reboot) before HomeBack can own it.',
-		);
-		if (changed) {
-			console.warn(
-				`Refusing to inject ${target.name} (${target.pid}): an existing non-HomeBack input hook is already mapped at ` +
-					`${mappedHookPath}. Remove the conflicting hook and restart the target process or reboot.`,
-			);
-		}
-	}
-
-	private async isHomeBackHookPath(mappedPath: string): Promise<boolean> {
-		if (isHomeBackMappedLibraryPath(mappedPath, INPUTHOOK_LIBRARY_PATH, SERVICE_ID)) return true;
-
-		try {
-			const [mappedRealPath, expectedRealPath] = await Promise.all([
-				fs.realpath(normalizeMappedLibraryPath(mappedPath)),
-				fs.realpath(INPUTHOOK_LIBRARY_PATH),
-			]);
-			return mappedRealPath === expectedRealPath;
-		} catch {
-			return false;
-		}
-	}
-
-	private async adoptExistingHook(target: ProcTargetSnapshot, hookPath: string): Promise<void> {
-		const { pid, name, startTimeTicks } = target;
-		const logPath = `/tmp/homeback-inputhook-${name}-${pid}.log`;
-		const injectorLogPath = `/tmp/homeback-ezinject-${name}-${pid}.log`;
-
-		let fd: number | null = null;
-		let offset = 0;
-		try {
-			fd = openSync(logPath, fsConstants.O_RDWR | fsConstants.O_NOFOLLOW);
-			const stat = fstatSync(fd);
-			if (!stat.isFile()) throw new Error('event log is not a regular file');
-			offset = stat.size;
-			if (offset > MAX_LOG_BYTES) {
-				ftruncateSync(fd, 0);
-				offset = 0;
-			}
-
-			const liveStartTime = await this.readProcessStartTime(pid);
-			if (liveStartTime !== startTimeTicks) {
-				throw new Error('target identity changed while adopting existing hook');
-			}
-		} catch (error) {
-			if (fd !== null) closeSync(fd);
-			const changed = this.blockTarget(
-				target,
-				hookPath,
-				'homeback-log-missing',
-				'Restart the target process or reboot. HomeBack will periodically recheck in case the log failure was transient.',
-			);
-			if (changed) {
-				console.error(
-					`HomeBack hook is already loaded in ${name} (${pid}), but its event log cannot be reattached; ` +
-						'reinjection is unsafe. Restart the target process or reboot to recover.',
-					error,
-				);
-			}
-			return;
-		}
-
-		this.blockedHooks.delete(pid);
-		this.injectionFailures.delete(pid);
-		this.targets.set(pid, {
-			pid,
-			name,
-			startTimeTicks,
-			logPath,
-			injectorLogPath,
-			hookPath,
-			state: 'active',
-			source: 'adopted',
-			injectionWatchdog: null,
-			injector: null,
-		});
-		// Start at EOF so a recreated helper never replays stale key events from before its restart.
-		this.logTailer.add(logPath, fd!, offset, true);
-		console.log(`Adopted existing HomeBack remote hook in ${name} (${pid}); reinjection skipped.`);
-	}
-
-	private async inject(snapshot: ProcTargetSnapshot): Promise<void> {
-		const { pid, name, startTimeTicks } = snapshot;
-		// Re-check target identity and maps immediately before spawning ezinject. This
-		// closes both PID-reuse and concurrent-hook races between scan and injection.
-		if (await this.readProcessStartTime(pid) !== startTimeTicks) {
-			void this.scanProcesses();
-			return;
-		}
-
-		const inspection = await this.inspectMappedHook(pid);
-		if (!inspection.mapsReadable) {
-			this.blockTarget(
-				snapshot,
-				'',
-				'proc-maps-unreadable',
-				'HomeBack could not complete its final /proc maps safety check. It will retry without injecting.',
-			);
-			return;
-		}
-		if (inspection.mappedHookPath) {
-			await this.handleMappedHook({ ...snapshot, ...inspection }, inspection.mappedHookPath);
-			return;
-		}
-
-		const logPath = `/tmp/homeback-inputhook-${name}-${pid}.log`;
-		const injectorLogPath = `/tmp/homeback-ezinject-${name}-${pid}.log`;
-		const target: InjectedTarget = {
-			pid,
-			name,
-			startTimeTicks,
-			logPath,
-			injectorLogPath,
-			hookPath: INPUTHOOK_LIBRARY_PATH,
-			state: 'injecting',
-			source: 'injected',
-			injectionWatchdog: null,
-			injector: null,
-		};
-		this.targets.set(pid, target);
-
-		let injectorFd: number | null = null;
-		try {
-			const eventFd = createFreshLogFile(logPath);
-			this.logTailer.add(logPath, eventFd, 0, true);
-			injectorFd = createFreshLogFile(injectorLogPath);
-
-			const child = spawn(EZINJECT_PATH, ['-l', logPath, String(pid), INPUTHOOK_LIBRARY_PATH], {
-				detached: true,
-				stdio: ['ignore', injectorFd, injectorFd],
-			});
-			target.injector = child;
-			target.injectionWatchdog = setTimeout(() => {
-				if (this.targets.get(pid) !== target || target.state !== 'injecting') return;
-				console.error(`ezinject watchdog expired for ${name} (${pid}) after ${INJECTION_WATCHDOG_MS}ms.`);
-				try {
-					child.kill('SIGKILL');
-				} catch {
-					// Process may have exited between the watchdog check and kill.
-				}
-				void this.failInjection(target, 'ezinject timed out').catch(error => {
-					console.error('Failed to record ezinject timeout:', error);
-				});
-			}, INJECTION_WATCHDOG_MS);
-
-			child.once('error', error => {
-				this.clearInjectionWatchdog(target);
-				target.injector = null;
-				void this.failInjection(target, `spawn error: ${String(error)}`).catch(failureError => {
-					console.error('Failed to record injection spawn error:', failureError);
-				});
-			});
-
-			child.once('exit', (code, signal) => {
-				this.clearInjectionWatchdog(target);
-				target.injector = null;
-				if (code !== 0 || signal !== null) {
-					void this.failInjection(
-						target,
-						`ezinject exit code=${String(code)} signal=${String(signal)}`,
-					).catch(failureError => {
-						console.error('Failed to record injection exit error:', failureError);
-					});
-					return;
-				}
-				setTimeout(() => {
-					void this.verifyInjection(target).catch(error => {
-						console.error('Injection verification failed unexpectedly:', error);
-					});
-				}, INJECTION_VERIFY_DELAY_MS);
-			});
-
-			child.unref();
-			console.log(`Injecting HomeBack remote hook into ${name} (${pid})`);
-		} catch (error) {
-			await this.failInjection(target, `unable to start ezinject: ${String(error)}`);
-		} finally {
-			if (injectorFd !== null) closeSync(injectorFd);
-		}
-	}
-
-	private clearInjectionWatchdog(target: InjectedTarget): void {
-		if (!target.injectionWatchdog) return;
-		clearTimeout(target.injectionWatchdog);
-		target.injectionWatchdog = null;
-	}
-
-	private async verifyInjection(target: InjectedTarget): Promise<void> {
-		let lastError = 'input hook verification did not run';
-
-		for (let attempt = 1; attempt <= INJECTION_VERIFY_ATTEMPTS; attempt += 1) {
-			if (this.targets.get(target.pid) !== target) return;
-
-			const startTimeTicks = await this.readProcessStartTime(target.pid);
-			if (startTimeTicks !== target.startTimeTicks) {
-				console.warn(`Target PID ${target.pid} was reused while verifying ${target.name}; abandoning stale verification.`);
-				await this.cleanupTarget(target.pid);
-				void this.scanProcesses();
-				return;
-			}
-
-			const inspection = await this.inspectMappedHook(target.pid);
-			if (!inspection.mapsReadable) {
-				lastError = 'target process maps became unreadable';
-			} else if (!inspection.mappedHookPath) {
-				lastError = 'input hook library not present in target process maps';
-			} else if (!(await this.isHomeBackHookPath(inspection.mappedHookPath))) {
-				lastError = `unexpected input hook mapped after injection: ${inspection.mappedHookPath}`;
-			} else {
-				target.hookPath = inspection.mappedHookPath;
-				target.state = 'active';
-				this.injectionFailures.delete(target.pid);
-				this.blockedHooks.delete(target.pid);
-				console.log(`HomeBack remote hook active in ${target.name} (${target.pid})`);
-				await this.syncTimedMappingsArmed();
-				return;
-			}
-
-			if (attempt < INJECTION_VERIFY_ATTEMPTS) {
-				await new Promise(resolve => setTimeout(resolve, INJECTION_VERIFY_DELAY_MS));
-			}
-		}
-
-		await this.failInjection(target, `verification failed: ${lastError}`);
-	}
-
-	// @invariant: bounded-injection-retries
-	private async failInjection(target: InjectedTarget, error: string): Promise<void> {
-		if (this.targets.get(target.pid) !== target) return;
-		await this.cleanupTarget(target.pid);
-
-		const previous = this.injectionFailures.get(target.pid);
-		const previousFailures = previous?.startTimeTicks === target.startTimeTicks ? previous.failures : 0;
-		const failures = previousFailures + 1;
-		if (failures >= MAX_INJECTION_FAILURES) {
-			this.injectionFailures.delete(target.pid);
-			this.blockTarget(
-				target,
-				'',
-				'injection-failed',
-				'Fix the injection failure, then restart the target process (or reboot) to permit automatic injection again.',
-				failures,
-			);
-			console.error(
-				`HomeBack injection failed ${failures} consecutive times for ${target.name} (${target.pid}); ` +
-					`automatic retries are now blocked. ${error}`,
-			);
-			return;
-		}
-
-		const retryDelay = injectionRetryDelayMs(failures);
-		if (retryDelay === null) {
-			console.error(
-				`Injection retry policy returned no delay before the failure limit for ${target.name} (${target.pid}); blocking safely.`,
-			);
-			this.blockTarget(
-				target,
-				'',
-				'injection-failed',
-				'Restart the target process or reboot after correcting the injection failure.',
-				failures,
-			);
-			return;
-		}
-		this.injectionFailures.set(target.pid, {
-			name: target.name,
-			startTimeTicks: target.startTimeTicks,
-			failures,
-			nextAttemptAt: Date.now() + retryDelay,
-			lastError: error,
-		});
-		console.warn(
-			`HomeBack injection attempt ${failures}/${MAX_INJECTION_FAILURES} failed for ${target.name} ` +
-				`(${target.pid}); retrying in ${retryDelay}ms. ${error}`,
-		);
-	}
-
-	private async cleanupTarget(pid: number): Promise<void> {
-		const target = this.targets.get(pid);
-		if (!target) return;
-
-		this.targets.delete(pid);
-		this.clearInjectionWatchdog(target);
-		if (target.injector) {
-			try {
-				target.injector.kill('SIGKILL');
-			} catch {
-				// Injector may already have exited.
-			}
-			target.injector = null;
-		}
-		this.logTailer.remove(target.logPath);
-		await this.syncTimedMappingsArmed();
-		await Promise.all([
-			fs.unlink(target.logPath).catch(() => undefined),
-			fs.unlink(target.injectorLogPath).catch(() => undefined),
-		]);
-	}
-
-	private parseLogLine(line: string): void {
-		let keycode: number | null = null;
-		let state: number | null = null;
-
-		let match = line.match(/lginput_uinput_send_button called: keyid=\d+, state=(-?\d+) uinput_code=(\d+)/);
-		if (match) {
-			state = Number(match[1]);
-			keycode = Number(match[2]);
-		}
-
-		if (keycode === null) {
-			match = line.match(/MICOM_FuncWriteKeyEvent called: fd=\d+, type=\d+, code=(\d+), value=(-?\d+)/);
-			if (match) {
-				keycode = Number(match[1]);
-				state = Number(match[2]);
-			}
-		}
-
-		if (keycode === null) {
-			match = line.match(/write to \/dev\/uinput: code=(\d+), value=(-?\d+)/);
-			if (match) {
-				keycode = Number(match[1]);
-				state = Number(match[2]);
-			}
-		}
-
-		if (keycode === null || state === null) return;
-		this.handleState(keycode, state);
-	}
-
-	private handleState(keycode: number, state: number): void {
-		this.lastKeyEvent = { keycode, state, atMs: Date.now() };
-		if (state === 2) return;
-
-		if (state === 0) {
-			const active = this.activePresses.get(keycode);
-			if (!active) return;
-
-			this.clearActivePress(keycode, active);
-			if (!active.longFired && active.mapping.short && this.canFireAction(keycode)) {
-				this.markActionFired(keycode);
-				void this.actionRunner.execute(active.mapping.short, keycode, 'short');
-			}
-			return;
-		}
-
-		if (state !== 1) return;
-
-		const mapping = this.config.keys[String(keycode)];
-		if (!mapping || !isTimedMapping(mapping) || this.activePresses.has(keycode)) return;
-
-		const threshold = actionThreshold(mapping, this.config);
-		const active: ActivePress = {
-			mapping,
-			startedAtMs: Date.now(),
-			longFired: false,
-			longTimer: null,
-			watchdogTimer: null,
-		};
-		this.activePresses.set(keycode, active);
-
-		if (mapping.long) {
-			active.longTimer = setTimeout(() => {
-				const current = this.activePresses.get(keycode);
-				if (current !== active || !this.canFireAction(keycode)) return;
-				current.longFired = true;
-				this.markActionFired(keycode);
-				void this.actionRunner.execute(mapping.long!, keycode, 'long');
-			}, threshold);
-		}
-
-		active.watchdogTimer = setTimeout(() => {
-			const current = this.activePresses.get(keycode);
-			if (current === active) {
-				const lastActionAt = this.lastActionAt.get(keycode) ?? 0;
-				if (lastActionAt < active.startedAtMs) {
-					console.warn(
-						`[HomeBackRemote] unserviced timed key keycode=${keycode} thresholdMs=${threshold}`,
-					);
-				}
-				console.warn(`Clearing stale remote key press for keycode ${keycode}.`);
-				this.clearActivePress(keycode, active);
-			}
-		}, threshold + MAX_STUCK_PRESS_GRACE_MS);
-	}
-
-	private clearActivePress(keycode: number, active: ActivePress): void {
-		if (active.longTimer) clearTimeout(active.longTimer);
-		if (active.watchdogTimer) clearTimeout(active.watchdogTimer);
-		this.activePresses.delete(keycode);
-	}
-
-	private canFireAction(keycode: number): boolean {
-		const previous = this.lastActionAt.get(keycode) ?? 0;
-		return Date.now() - previous >= ACTION_COOLDOWN_MS;
-	}
-
-	private markActionFired(keycode: number): void {
-		this.lastActionAt.set(keycode, Date.now());
+	private runGuarded(message: string, task: () => Promise<void>): void {
+		void task().catch(error => console.error(message, error));
 	}
 }
