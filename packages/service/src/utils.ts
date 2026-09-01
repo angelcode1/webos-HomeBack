@@ -1,5 +1,16 @@
 import { spawn } from 'child_process';
-import { promises } from 'fs';
+import {
+	closeSync,
+	constants as fsConstants,
+	fchmodSync,
+	fsyncSync,
+	mkdirSync,
+	promises,
+	renameSync,
+	unlinkSync,
+	writeFileSync,
+	openSync,
+} from 'fs';
 import { dirname } from 'path';
 import process from 'process';
 
@@ -40,6 +51,43 @@ export const writeFile = async (
 		await promises.rename(temporary, path);
 	} catch (error) {
 		await promises.unlink(temporary).catch(() => undefined);
+		throw error;
+	}
+};
+
+/**
+ * Synchronous counterpart used only by process-exit fail-safe paths. Write a
+ * new inode opened with O_NOFOLLOW, fsync it, then atomically replace the
+ * destination so the native hook never observes truncated JSON.
+ */
+export const writeFileAtomicSync = (
+	path: string,
+	content: string,
+	mode: number,
+): void => {
+	const temporary = `${path}.homeback-tmp-${process.pid}-${Date.now()}`;
+	let fd: number | null = null;
+	try {
+		mkdirSync(dirname(path), { recursive: true });
+		fd = openSync(
+			temporary,
+			fsConstants.O_WRONLY |
+				fsConstants.O_CREAT |
+				fsConstants.O_EXCL |
+				fsConstants.O_NOFOLLOW,
+			mode,
+		);
+		fchmodSync(fd, mode);
+		writeFileSync(fd, content, { encoding: 'utf8' });
+		fsyncSync(fd);
+		closeSync(fd);
+		fd = null;
+		renameSync(temporary, path);
+	} catch (error) {
+		if (fd !== null) {
+			try { closeSync(fd); } catch { /* descriptor already closed */ }
+		}
+		try { unlinkSync(temporary); } catch { /* temporary file may not exist */ }
 		throw error;
 	}
 };
