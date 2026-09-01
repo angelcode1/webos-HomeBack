@@ -11,7 +11,7 @@
     "typecheck": "tsc -p packages/app/tsconfig.json && tsc -p packages/service/tsconfig.json && tsc -p packages/utils/tsconfig.json",
     "check": "yarn test && yarn typecheck",
     "check:full": "yarn check && yarn lint",
-    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test": "node --experimental-transform-types --test tests/*.test.ts",
     "format": "prettier --write .",
     "verify:publication": "node scripts/verify-publication.cjs"
   },
