@@ -3,7 +3,7 @@ import {
 	type RemoteConfig,
 	type RemoteMapping,
 	type TimedMapping,
-} from './remote-config';
+} from './remote-config.ts';
 
 type ShortcutState = {
 	label: string;
