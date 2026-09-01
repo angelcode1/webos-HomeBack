@@ -1,1 +1,1 @@
-export const systemInfoKeys = ['firmwareVersion', 'sdkVersion', 'modelName'] as const;
+export const systemInfoKeys = ['sdkVersion'] as const;
