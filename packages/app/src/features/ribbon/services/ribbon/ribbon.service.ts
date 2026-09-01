@@ -4,34 +4,22 @@ import { ActivationService, type ActivationAction } from 'shared/services/activa
 import type { LaunchPointInstance } from 'shared/services/launcher';
 import { LauncherService } from 'shared/services/launcher';
 import { KeyboardService } from 'shared/services/keyboard';
-import { luna } from 'shared/services/luna';
 import { SurfaceService } from 'shared/services/surface';
 
 import { AppDrawerService } from '../app-drawer';
 import { ScrollService } from '../scroll';
+import { RemoteHealthService } from './remote-health.service';
 import { RIBBON_AUTO_HIDE_MS } from './ribbon.lib';
-
-const REMOTE_HEALTH_POLL_MS = 5_000;
-
-type RemoteStatusResponse = {
-	returnValue: true;
-	status: {
-		legacyInputHookDetected?: boolean;
-		blockedHooks?: Array<{ name?: string; reason?: string; recovery?: string }>;
-	};
-};
 
 export class RibbonService {
 	public visible = false;
 	public moving = false;
 	public deleteFocused = false;
 	public numericKeypadVisible = false;
-	public remoteWarning: string | null = null;
 
 	private ref: HTMLElement | null = null;
 	private index: number | null = null;
 	private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
-	private remoteHealthTimer: ReturnType<typeof setInterval> | null = null;
 
 	public constructor(
 		public readonly launcherService: LauncherService,
@@ -40,10 +28,11 @@ export class RibbonService {
 		private readonly activationService: ActivationService,
 		private readonly surfaceService: SurfaceService,
 		public readonly keyboardService: KeyboardService,
+		private readonly remoteHealthService: RemoteHealthService,
 	) {
 		makeAutoObservable<
 			RibbonService,
-			'ref' | 'activationService' | 'surfaceService' | 'autoHideTimer' | 'remoteHealthTimer' | 'keyboardService'
+			'ref' | 'activationService' | 'surfaceService' | 'autoHideTimer' | 'keyboardService' | 'remoteHealthService'
 		>(
 			this,
 			{
@@ -51,8 +40,8 @@ export class RibbonService {
 				activationService: false,
 				surfaceService: false,
 				autoHideTimer: false,
-				remoteHealthTimer: false,
 				keyboardService: false,
+				remoteHealthService: false,
 			},
 			{ autoBind: true },
 		);
@@ -75,10 +64,9 @@ export class RibbonService {
 
 				this.moving = false;
 				this.deleteFocused = false;
-				this.appDrawerService.visible = false;
+				this.appDrawerService.close();
 				if (!visible) this.numericKeypadVisible = false;
-
-				if (visible) void this.refreshRemoteHealth();
+				this.remoteHealthService.setActive(visible);
 			},
 			{ fireImmediately: true },
 		);
@@ -106,16 +94,6 @@ export class RibbonService {
 		surfaceService.emitter.on('dismissFeatures', this.hide);
 		this.launcherService.emitter.on('openDrawer', this.openDrawer);
 		this.launcherService.emitter.on('openNumericKeyboard', this.openNumericKeypad);
-
-		this.remoteHealthTimer = setInterval(() => {
-			if (this.visible) void this.refreshRemoteHealth();
-		}, REMOTE_HEALTH_POLL_MS);
-	}
-
-	public dispose(): void {
-		if (this.remoteHealthTimer === null) return;
-		clearInterval(this.remoteHealthTimer);
-		this.remoteHealthTimer = null;
 	}
 
 	public get selectedLaunchPoint(): LaunchPointInstance | null {
@@ -141,7 +119,7 @@ export class RibbonService {
 	}
 
 	public get warningText(): string | null {
-		if (this.remoteWarning) return this.remoteWarning;
+		if (this.remoteHealthService.warning) return this.remoteHealthService.warning;
 		if (this.launcherService.providerErrorCount > 0) {
 			return 'Some launcher sources are unavailable. Reopen HomeBack or check system services.';
 		}
@@ -164,7 +142,7 @@ export class RibbonService {
 
 	public openNumericKeypad(): void {
 		this.finishEditing();
-		this.appDrawerService.visible = false;
+		this.appDrawerService.close();
 		this.numericKeypadVisible = true;
 	}
 
@@ -188,7 +166,7 @@ export class RibbonService {
 		const target = launchPoint ?? this.selectedLaunchPoint;
 		if (!target || target.builtin) return;
 
-		this.appDrawerService.visible = false;
+		this.appDrawerService.close();
 		this.index = this.launcherService.visible.indexOf(target);
 		if (this.index < 0) return;
 
@@ -242,10 +220,6 @@ export class RibbonService {
 		this.index = max >= 0 ? Math.min(oldIndex, max) : null;
 	}
 
-	private get mounted(): boolean {
-		return Boolean(this.ref);
-	}
-
 	private handleActivation(action: ActivationAction): void {
 		if (action.type === 'showLauncher') this.show();
 		else if (action.type === 'toggleLauncher') this.toggle();
@@ -259,7 +233,7 @@ export class RibbonService {
 	private openDrawer(): void {
 		this.finishEditing();
 		this.numericKeypadVisible = false;
-		this.appDrawerService.visible = true;
+		this.appDrawerService.open();
 	}
 
 	private scheduleAutoHide(): void {
@@ -340,28 +314,5 @@ export class RibbonService {
 		this.noteInteraction();
 		if (this.moving) this.finishEditing();
 		else this.hide();
-	}
-
-	private async refreshRemoteHealth(): Promise<void> {
-		try {
-			const response = await luna<RemoteStatusResponse>(
-				`luna://${process.env.SERVICE_ID}/remote/status`,
-			);
-			if (response.status.legacyInputHookDetected) {
-				this.remoteWarning = 'Another input hook is active. Reboot after removing the conflicting hook.';
-				return;
-			}
-
-			const blocked = (response.status.blockedHooks ?? []).find(item =>
-				item.reason === 'foreign-hook' ||
-				item.reason === 'injection-failed' ||
-				item.reason === 'homeback-log-missing',
-			);
-			this.remoteWarning = blocked
-				? `Remote hook issue${blocked.name ? ` (${blocked.name})` : ''}: ${blocked.recovery ?? 'reboot and check HomeBack diagnostics.'}`
-				: null;
-		} catch (error) {
-			if (__DEV__) console.warn('Unable to read HomeBack remote-input health:', error);
-		}
 	}
 }
