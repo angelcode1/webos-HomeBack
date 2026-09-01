@@ -14,6 +14,8 @@ const PREVIEW_MIN_DURATION_MS = 1_000;
 const PREVIEW_DEFAULT_DURATION_MS = 8_000;
 const PREVIEW_MAX_DURATION_MS = 10_000;
 const DEFAULT_NOTIFICATION_KEY = '__default__';
+const SERVICE_ID_SUFFIX = '.service';
+const CAMERA_TOAST_ICON_FILENAME = 'camera-toast-icon.png';
 
 export type PreviewNotificationRequest = {
 	cameraId?: string;
@@ -31,6 +33,7 @@ export type NotificationToastRequest = {
 	message: string;
 	sourceId: string;
 	type: 'light';
+	iconUrl: string;
 };
 
 export type RecentCameraEntry = {
@@ -65,6 +68,13 @@ const boundedOpaqueString = (value: unknown, maxLength: number): string | null =
 	return normalized && normalized.length <= maxLength ? normalized : null;
 };
 
+const cameraToastIconUrl = (sourceId: string): string => {
+	const appId = sourceId.endsWith(SERVICE_ID_SUFFIX)
+		? sourceId.slice(0, -SERVICE_ID_SUFFIX.length)
+		: sourceId;
+	return `file:///media/developer/apps/usr/palm/applications/${appId}/${CAMERA_TOAST_ICON_FILENAME}`;
+};
+
 export const getPreviewNotificationKey = (request: PreviewNotificationRequest): string =>
 	boundedOpaqueString(request.cameraId, CAMERA_ID_MAX_LENGTH) ?? DEFAULT_NOTIFICATION_KEY;
 
@@ -81,6 +91,7 @@ export const buildPreviewToastRequest = (
 		message: truncateCodePoints(combined, TOAST_MESSAGE_MAX_LENGTH),
 		sourceId,
 		type: 'light',
+		iconUrl: cameraToastIconUrl(sourceId),
 	};
 };
 
