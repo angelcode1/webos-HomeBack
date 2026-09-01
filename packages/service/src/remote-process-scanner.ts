@@ -1,8 +1,8 @@
 import { promises as fs } from 'fs';
 import { basename } from 'path';
 
-import { findMappedLibraryPath } from './remote-input-ownership';
-import { parseProcStatIdentity, type ProcIdentity } from './remote-process';
+import { findMappedLibraryPath } from './remote-input-ownership.ts';
+import { parseProcStatIdentity, type ProcIdentity } from './remote-process.ts';
 
 export type ProcTargetSnapshot = ProcIdentity & {
 	pid: number;
