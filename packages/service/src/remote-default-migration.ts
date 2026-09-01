@@ -4,8 +4,6 @@ import { validateConfig } from './remote-config';
 import { migrateDefaultRemoteShortcuts } from './remote-default-migration.lib';
 import { writeFile } from './utils';
 
-export { migrateDefaultRemoteShortcuts } from './remote-default-migration.lib';
-
 export const migrateRemoteDefaultsFile = async (path: string): Promise<void> => {
 	let stat;
 	try {
