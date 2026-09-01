@@ -8,6 +8,15 @@ const APP_ROOTS = [
 ] as const;
 
 const MAX_ICON_BYTES = 2 * 1024 * 1024;
+const ICON_CACHE_MAX_ENTRIES = 128;
+
+type IconCacheEntry = {
+	mtimeMs: number;
+	size: number;
+	dataUrl: string;
+};
+
+const iconCache = new Map<string, IconCacheEntry>();
 
 type AppInfo = {
 	id?: unknown;
@@ -70,6 +79,17 @@ const mimeFor = (path: string): string | null => {
 	}
 };
 
+const cacheIcon = (canonical: string, entry: IconCacheEntry): string => {
+	iconCache.delete(canonical);
+	iconCache.set(canonical, entry);
+	while (iconCache.size > ICON_CACHE_MAX_ENTRIES) {
+		const oldest = iconCache.keys().next().value as string | undefined;
+		if (oldest === undefined) break;
+		iconCache.delete(oldest);
+	}
+	return entry.dataUrl;
+};
+
 const readIconFile = async (candidate: string): Promise<string | null> => {
 	if (!lexicalAllowedPath(candidate)) return null;
 
@@ -80,16 +100,22 @@ const readIconFile = async (candidate: string): Promise<string | null> => {
 		const mime = mimeFor(canonical);
 		if (!mime) return null;
 
-		const lstat = await fs.lstat(candidate);
-		if (!lstat.isFile() && !lstat.isSymbolicLink()) return null;
-
 		const stat = await fs.stat(canonical);
 		if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_ICON_BYTES) return null;
+
+		const cached = iconCache.get(canonical);
+		if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+			return cacheIcon(canonical, cached);
+		}
 
 		const buffer = await fs.readFile(canonical);
 		if (buffer.length !== stat.size || buffer.length > MAX_ICON_BYTES) return null;
 
-		return `data:${mime};base64,${buffer.toString('base64')}`;
+		return cacheIcon(canonical, {
+			mtimeMs: stat.mtimeMs,
+			size: stat.size,
+			dataUrl: `data:${mime};base64,${buffer.toString('base64')}`,
+		});
 	} catch {
 		return null;
 	}
