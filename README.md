@@ -34,7 +34,7 @@ The normal built-in utility tiles are:
 
 **Inputs → Keypad → Add apps**
 
-When a fresh camera event is available, **Cameras** is inserted before **Add apps**. The Cameras entry is intentionally a short-lived recent-event view, not a permanent camera directory.
+When a fresh camera event is available, **Cameras** is inserted before **Add apps**. The Cameras entry is intentionally a short-lived recent-event view, not a permanent camera directory. Recent Cameras is volatile in-memory state: a HomeBack service/system restart clears it rather than persisting camera-event URLs across reboot.
 
 - **Inputs** opens the TV input picker.
 - **Keypad** opens a compact pad above the HomeBack tray. Each digit is sent immediately to the TV as the corresponding physical remote number key, so on Live TV it can be used for normal channel-number entry. A four-button **R / G / Y / B** row sits below `0` and sends the corresponding LG colour-key IDs. The in-app pad avoids webOS shifting the tray when the system virtual keyboard opens. Press **Back** to dismiss the keypad without leaving HomeBack.
@@ -47,7 +47,7 @@ Use the D-pad or Magic Remote wheel in the app drawer. HomeBack keeps drawer whe
 
 ## Home Assistant camera notifications — Preview
 
-> **Preview validation scope:** the TV-side notification, Recent Cameras and interactive-preview architecture was hardware-validated on one **LG OLED42C5PSA.AAUQLJD** running **webOS SDK 10.0.0** and **firmware 33.00.71**. Those tests invoked HomeBack from a root TV shell with `luna-send`; an end-to-end Home Assistant detection event and production HA → TV transport have **not** yet been validated.
+> **Preview validation scope:** the TV-side notification, Recent Cameras, interactive Preview and opt-in authenticated HTTP transport were hardware-validated on one **LG OLED42C5PSA.AAUQLJD** running **webOS SDK 10.0.0** and **firmware 33.00.71**. Real Home Assistant `rest_command` ingress, HA-hosted static JPEG media, synthetic-camera proxy snapshot/stream behavior, source restriction, token lifetime and restart behavior were exercised end to end. Those results are single-device/integration evidence, not universal webOS or Home Assistant claims.
 
 HomeBack targets webOS 6+, but this validation cycle did not exercise older firmware. When the reported SDK version is below 7.3, HomeBack uses the compositor `suspense` path rather than `webOSSystem.hide()` when hiding its surface; that older-version path remains untested on hardware.
 
@@ -55,18 +55,225 @@ Native-toast behavior is also firmware-specific. On the tested TV/firmware, `typ
 
 HomeBack has two deliberately different TV-side camera-notification paths:
 
-- **Passive notification** — an external integration calls HomeBack's `/notification/createPreviewToast` service method. webOS shows its native compact top-right toast and keeps the app you are watching in control of the D-pad on the tested webOS 10 TV.
-- **Interactive video/image preview** — an external integration explicitly launches `homeback:preview` with `interactive:true`. HomeBack shows its own **bright top-right** preview, intentionally owns remote input while it is visible, dismisses on **Back**, and enforces a hard maximum of 10 seconds.
+- **Passive notification** — an external integration calls HomeBack's `/notification/createPreviewToast` operation. webOS shows its native compact top-right toast and keeps the app you are watching in control of the D-pad on the tested webOS 10 TV.
+- **Interactive video/image preview** — HomeBack launches its bounded `homeback:preview` surface when the user opens the recent camera event. The Preview owns remote input while visible, dismisses on **Back**, and enforces a hard maximum of 10 seconds.
 
 This is an intentional platform tradeoff: the native toast preserves underlying-app input but webOS controls its pixels, while the HomeBack interactive preview controls its appearance but owns input while visible.
 
-Passive notifications are suppressed for **5 seconds per camera ID** to collapse detector bursts. A suppressed event still refreshes the camera's newest media URL, so a burst of detections produces one toast while the Cameras tile points at the most recent event.
+Passive notifications are suppressed for **5 seconds per camera ID** to collapse detector bursts. A suppressed event still refreshes the camera's newest media URL, so a burst of detections produces one toast while the Cameras entry points at the most recent event.
 
-The HA transport is intentionally unresolved. SSH is currently a reference path, while authenticated HTTP and MQTT remain design options. See [issue #22](https://github.com/angelcode1/webos-HomeBack/issues/22) before treating any transport as the settled integration architecture.
+The selected transport is an **opt-in authenticated HTTP listener**. It is disabled by default. SSH/`luna-send` remains a developer, recovery and reference path; MQTT remains a possible future transport if broker-native or dynamic-addressing requirements justify it. See [issue #22](https://github.com/angelcode1/webos-HomeBack/issues/22) and [HTTP-PREVIEW-VALIDATION.md](./HTTP-PREVIEW-VALIDATION.md) for the measured evidence and boundaries.
 
-### Test a passive notification from the TV shell
+### Enable the authenticated HTTP transport
 
-Run this over SSH on the TV:
+The HTTP listener is plain HTTP with bearer authentication. Treat it as a **trusted-LAN Preview feature only**: do not port-forward it to the Internet, and do not use it across an untrusted network where the bearer token could be observed in transit.
+
+The enable order matters because HomeBack does not create a bearer token until the listener has successfully bound its port:
+
+1. **Confirm the default disabled state after configuration has loaded.** `/remote/status` should report `httpConfigLoaded: true`, `httpEnabled: false` and `httpListening: false`. A fresh config is `/home/root/.config/homeback/http.json` with `enabled: false`; no API token is created while HTTP has never been enabled. Disabling a listener that was enabled previously does not itself delete the existing token. On the measured C5, a fresh **manual candidate-IPK install** required one HomeBack app launch before root-helper initialisation and default HTTP-config creation had completed; that exact bootstrap sequence is scoped to the measured manual-install path.
+2. **Edit the HTTP config.** Set `enabled` to `true`, keep or change port `9876`, and preferably pin `allowedSources` to the Home Assistant host's IPv4 address.
+3. **Restart the HomeBack service.** The listener is service-owned; restarting only the HomeBack UI app is not the enable action.
+4. **Check `/remote/status`.** A successful config load/bind should report `httpConfigLoaded: true`, `httpEnabled: true`, `httpListening: true`, the configured `httpPort`, and `httpFailureReason: null`.
+5. **Only after that successful bind, read the token** from `/home/root/.config/homeback/api-token`. If the file does not exist, check `httpConfigLoaded`, `httpFailureReason` and the configured port/source settings first.
+6. **Store the full Authorization value in Home Assistant `secrets.yaml`**, then configure `rest_command` as shown below.
+
+Recommended config when Home Assistant is `192.168.1.10`:
+
+```json
+{
+  "http": {
+    "enabled": true,
+    "port": 9876,
+    "allowedSources": ["192.168.1.10"]
+  }
+}
+```
+
+`allowedSources: []` does **not** mean deny-all. When the list is empty, HomeBack accepts authenticated clients from RFC1918 IPv4 private ranges (`10/8`, `172.16/12`, `192.168/16`). That is convenient for initial setup but is a broader trust boundary. Pin the HA host/IP when practical. IPv4 CIDR entries such as `192.168.1.0/24` are also supported when a bounded subnet is intentional.
+
+Restart and inspect the service from the TV shell:
+
+```sh
+luna-send -n 1 -f \
+  luna://com.homebrew.homeback.service/restartService \
+  '{}'
+
+# Reconnect after the service restarts, then:
+luna-send -n 1 -f \
+  luna://com.homebrew.homeback.service/remote/status \
+  '{}'
+```
+
+Expected HTTP fields after a successful enable are equivalent to:
+
+```text
+httpConfigLoaded: true
+httpEnabled: true
+httpListening: true
+httpPort: 9876
+httpFailureReason: null
+```
+
+`httpConfigLoaded: false` means the current service instance has not yet completed a valid HTTP-config load (or that config loading failed). Hardware validation reproduced that transient state during `restartService`, followed by the expected loaded/listening state.
+
+Then retrieve the generated token over the trusted root shell:
+
+```sh
+cat /home/root/.config/homeback/api-token
+```
+
+The token file is root-only (`0600`). Token rotation is currently an explicit local-admin operation rather than an HTTP endpoint. To rotate without leaving the old listener open, set `enabled: false` and restart the service, remove `/home/root/.config/homeback/api-token`, set `enabled: true`, restart again, verify `httpListening: true`, then read the newly generated token and update HA. Do not expose token retrieval or arbitrary Luna calls through the HTTP listener.
+
+### Home Assistant `rest_command` — Preview
+
+Put the **full** Authorization header value in `secrets.yaml`:
+
+```yaml
+homeback_token: "Bearer REPLACE_WITH_THE_64_HEX_TOKEN"
+```
+
+Then add the commands to `configuration.yaml`, replacing the TV IP with your own:
+
+```yaml
+rest_command:
+  homeback_status:
+    url: "http://192.168.1.50:9876/status"
+    method: GET
+    headers:
+      Authorization: !secret homeback_token
+
+  homeback_preview:
+    url: "http://192.168.1.50:9876/notification/createPreviewToast"
+    method: POST
+    content_type: "application/json"
+    headers:
+      Authorization: !secret homeback_token
+    payload: >-
+      {"cameraId": {{ camera_id | tojson }},
+       "title": {{ title | tojson }},
+       "message": {{ message | tojson }},
+       "preview": {
+         "title": {{ title | tojson }},
+         "message": {{ message | tojson }},
+         "imageUrl": {{ image_url | tojson }},
+         "durationMs": {{ (duration_ms | default(8000) | int) | tojson }}
+       }}
+```
+
+Every interpolated JSON value is serialized with Jinja `| tojson`; do not hand-quote camera names, messages or signed URLs. Quotes, backslashes, Unicode and other camera metadata must remain valid JSON.
+
+### Recommended HA recipe — snapshot to `/local/`
+
+For an 8–10 second notification Preview, the recommended default is a fresh JPEG snapshot rather than a live camera-proxy stream. On the tested path, an ordinary HA-hosted `/local/*.jpg` rendered on the **first** Preview activation, while both synthetic-camera `camera_proxy` and `camera_proxy_stream` were blank/white on first activation and rendered on the second. The exact HA proxy/FFmpeg warm-up mechanism was not timed directly; this is integration guidance, not a HomeBack source defect.
+
+#### One-time `/local/` setup
+
+Home Assistant serves `/config/www` at `/local/`, but if `www` does not exist when Home Assistant starts, creating it afterwards does not register the route until a restart. Create the directory first:
+
+```sh
+mkdir -p /config/www/homeback
+```
+
+If `/config/www` was created for the first time while HA was already running, **restart Home Assistant once** before relying on `/local/`. See Home Assistant's [HTTP static-file documentation](https://www.home-assistant.io/integrations/http/#hosting-files).
+
+Current Home Assistant allows `camera.snapshot` to write under the configuration `www` directory without adding another `allowlist_external_dirs` entry. Use one stable file per camera and overwrite it on each event:
+
+```yaml
+automation:
+  - alias: "Front door to HomeBack"
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.front_door_person
+        to: "on"
+    actions:
+      - action: camera.snapshot
+        target:
+          entity_id: camera.front_door
+        data:
+          filename: /config/www/homeback/front_door.jpg
+
+      - action: rest_command.homeback_preview
+        data:
+          camera_id: camera.front_door
+          title: Front Door
+          message: Person detected
+          image_url: >-
+            http://192.168.1.10:8123/local/homeback/front_door.jpg?v={{ now().timestamp() | int }}
+          duration_ms: 8000
+```
+
+After a snapshot exists, verify HA's static route with a real **GET** before diagnosing HomeBack:
+
+```sh
+curl -sS -o /dev/null \
+  -w 'http=%{http_code} bytes=%{size_download} type=%{content_type}\n' \
+  http://192.168.1.10:8123/local/homeback/front_door.jpg
+```
+
+Require HTTP 200, non-zero bytes and an image content type. Using GET avoids treating a setup-specific HEAD response as a false route failure.
+
+#### Snapshot security and semantics
+
+**`/config/www` is served without Home Assistant authentication.** Anything that can reach the HA HTTP endpoint and knows or guesses the URL can fetch the snapshot until the file is overwritten or removed. If your HA endpoint is reachable beyond the LAN, the exposure boundary is broader than the LAN too.
+
+Use a stable file **per camera** — for example `front_door.jpg` and `driveway.jpg` — rather than accumulating timestamped unauthenticated event files. The `?v=<event>` query string is a cache buster; it does not make the underlying JPEG immutable.
+
+HomeBack stores the event URL, but that URL points at a mutable per-camera file. Opening Recent Cameras later therefore shows the **latest contents of that camera's snapshot file**, not a guaranteed archival copy of the frame that originally produced the toast. With multiple cameras, each camera entry independently points at its own mutable file. This aligns with HomeBack's newest-wins behavior but is not event-image archival.
+
+### Optional live-motion recipe
+
+If live motion matters more than first-open predictability, pass a current HA `camera_proxy_stream` or integration-specific signed/proxied URL instead:
+
+```yaml
+      - action: rest_command.homeback_preview
+        data:
+          camera_id: camera.front_door
+          title: Front Door
+          message: Person detected
+          image_url: >-
+            http://192.168.1.10:8123/api/camera_proxy_stream/camera.front_door?token={{ state_attr('camera.front_door', 'access_token') }}
+          duration_ms: 8000
+```
+
+On the tested synthetic FFmpeg camera, constraining the source to camera-like output removed the earlier extreme-source slow/stalling behavior: the toast was prompt, moving video was smooth and no stalls were observed after warm-up. The first proxy Preview activation was still blank/white and the second rendered. A single-JPEG `camera_proxy` showed the same first-open blank/second-open render, while a local packaged image and ordinary HA `/local/` JPEG both rendered first time. Other integrations such as Frigate/Reolink were not tested and must not be assumed to behave the same way.
+
+An HA automation can prime a known-cold camera/proxy before sending the HomeBack event if desired. HomeBack itself intentionally does not store HA camera credentials, refresh tokens, or queue stale notifications.
+
+### Camera-token lifetime
+
+A fixed token from the tested synthetic HA camera remained HTTP 200 at approximately 2 s, 62 s, 183 s and 302 s after capture, and returned 403 by 600 s. The exact expiry instant was not measured. HomeBack's Recent Cameras entry expires after 120 s, so in that run the HomeBack registry expired first by at least about 180 s. Restarting HA Core invalidated the pre-restart camera token immediately.
+
+That evidence is recorded in [issue #21](https://github.com/angelcode1/webos-HomeBack/issues/21). The recommended `/local/` snapshot recipe removes camera-token expiry from the normal recipe entirely; token lifetime still matters for optional proxy/signed-media integrations.
+
+### Measured standby/wake behavior on the tested C5
+
+Use the repository probe rather than hand-timing the listener:
+
+```sh
+HOMEBACK_TOKEN="$(ssh root@TV-IP cat /home/root/.config/homeback/api-token)" \
+  node scripts/measure-http-preview-standby.cjs http://TV-IP:9876
+```
+
+The corrected probe makes an authenticated `/status` request every 500 ms, applies a true 2000 ms whole-request deadline by default, records a separate connected-socket inactivity result and `connected=true|false`, and caps concurrent probes. It does not print the bearer token.
+
+The tested C5 exhibited **at least two standby lifecycle behaviors**:
+
+- in two corrected cycles it became network-unavailable at `>119.297/<=119.787 s` and `>119.172/<=119.655 s`, then underwent a real kernel reboot; after manual wake, authenticated HTTP completed at `54.877 s` and `53.711 s` respectively;
+- in a later session, real Home Assistant requests were still accepted at about +30 s, +135 s and, in an isolated run with no earlier event traffic, +180 s after the physical standby mark. The +180 s run remained on the same kernel boot.
+
+The earlier unavailable/reboot cycles had **continuous authenticated 500 ms polling from the Mac and still went dark**, so ordinary active inbound TCP/HTTP traffic is not sufficient to hold that standby mode awake. The +180 s isolated run also rules out the earlier +30 s notification as the sole reason the later session remained reachable.
+
+The controlling platform state is not established. Record LG power settings such as **Quick Start+** in future evidence, but treat them as hypotheses until a controlled setting change reproduces the lifecycle difference.
+
+The TV wall clock was stable within a boot but discontinuous across reboots. Do not derive cross-host boot timing from TV `date - /proc/uptime` across a reboot.
+
+HomeBack camera notifications target a TV that is already on. If the TV/service is unavailable, requests are intended to fail/drop rather than queue for replay at power-on. HTTP 200 means HomeBack accepted the event while reachable; it does not prove a person saw it and does not make it durable.
+
+The later real-HA deep-off/drop test is recorded as **NOT REPRODUCED**, because the listener never became unavailable in that session. Earlier cycles still prove that an unavailable/reboot mode exists. See [HTTP-PREVIEW-VALIDATION.md](./HTTP-PREVIEW-VALIDATION.md) for the complete evidence and separation of hardware-proven, CI-proven and characterised behavior.
+
+### Test the TV-side Luna path directly
+
+The existing Luna method remains useful for local diagnosis without opening the HTTP listener:
 
 ```sh
 luna-send -n 1 -f \
@@ -85,9 +292,7 @@ luna-send -n 1 -f \
   }'
 ```
 
-`preview.imageUrl` is optional for a text-only toast. When it is present, HomeBack keeps the newest URL for that camera as a **recent event** for up to two minutes. After that it is removed from the Cameras list rather than being presented as a reliable live-camera URL.
-
-Real Home Assistant camera-proxy/signed URL lifetime has not yet been validated end to end. Such URLs can expire or be invalidated independently of HomeBack's two-minute convenience window. HomeBack therefore does **not** store camera credentials, refresh HA tokens, or promise that a recent-event URL remains usable for the full window. If a URL has already expired, the interactive preview reports **Camera unavailable**. See [issue #21](https://github.com/angelcode1/webos-HomeBack/issues/21) for the deferred HA token-lifetime validation.
+`preview.imageUrl` is optional for a text-only toast. When it is present, HomeBack keeps the newest URL for that camera as a **recent event** for up to two minutes. After that it is removed from the Cameras list rather than being presented as a reliable live-camera URL. The registry is intentionally volatile and is cleared by a HomeBack service/system restart.
 
 ### Test an explicit interactive preview
 
@@ -112,75 +317,9 @@ luna-send -n 1 -f \
 
 The interactive card is always rendered with HomeBack's bright palette at the **top-right** of the screen. On the tested TV/firmware, the native passive toast separately uses webOS `type: "light"` to select the compact toast form; webOS still owns its colours and system icon.
 
-### Reference Home Assistant automation over SSH — Preview / not end-to-end validated
+### SSH remains a reference/recovery path
 
-The following SSH route is a **reference integration**, not the settled production transport. The TV-local `luna-send` endpoint and UI behavior were hardware-validated, but this Home Assistant YAML has not yet been exercised from a real detection event. Transport selection is tracked in [issue #22](https://github.com/angelcode1/webos-HomeBack/issues/22).
-
-Home Assistant's `shell_command` integration can call the TV over SSH. Store the HA SSH key under `/config/.ssh`; do not rely on `/root/.ssh` inside the Home Assistant container.
-
-A convenient way to avoid shell-quoting camera URLs and messages is to install this small decoder on the TV once:
-
-```sh
-cat >/home/root/homeback-camera-notify.sh <<'EOF'
-#!/bin/sh
-set -eu
-[ "$#" -eq 1 ] || exit 64
-payload="$(printf '%s' "$1" | base64 -d)"
-exec luna-send -n 1 -f \
-  -a com.homebrew.homeback.service \
-  luna://com.homebrew.homeback.service/notification/createPreviewToast \
-  "$payload"
-EOF
-chmod 700 /home/root/homeback-camera-notify.sh
-```
-
-Then add a shell command in Home Assistant. Replace the TV IP with your own:
-
-```yaml
-shell_command:
-  homeback_camera_event: >-
-    ssh -i /config/.ssh/id_ed25519
-    -o UserKnownHostsFile=/config/.ssh/known_hosts
-    root@192.168.1.50
-    /home/root/homeback-camera-notify.sh
-    {{ ({
-      "cameraId": camera_id,
-      "title": title,
-      "message": message,
-      "preview": {
-        "title": title,
-        "message": message,
-        "imageUrl": image_url,
-        "durationMs": duration_ms | default(8000)
-      }
-    } | to_json | base64_encode) }}
-```
-
-Home Assistant supports templated `shell_command` action data, `to_json`, and `base64_encode`. After adding or changing `shell_command`, reload that integration from **Settings → Tools → YAML**.
-
-An automation can then pass the current HA camera-proxy stream URL. For camera integrations exposing the current `access_token`, a local-network example is:
-
-```yaml
-automation:
-  - alias: "Front door to HomeBack"
-    triggers:
-      - trigger: state
-        entity_id: binary_sensor.front_door_person
-        to: "on"
-    actions:
-      - action: shell_command.homeback_camera_event
-        data:
-          camera_id: camera.front_door
-          title: Front Door
-          message: Person detected
-          image_url: >-
-            http://192.168.1.10:8123/api/camera_proxy_stream/camera.front_door?token={{ state_attr('camera.front_door', 'access_token') }}
-          duration_ms: 8000
-```
-
-If the TV is off or HomeBack is unavailable, camera events should be **dropped rather than queued or replayed later**. A future transport must preserve that behavior; stale detections appearing when the TV powers on are not useful notifications.
-
-Use an HA URL that the TV can actually reach. The notification path is HA → TV, while preview media is fetched in the opposite direction, TV → HA. Both network directions therefore need to work. If your camera integration does not expose `access_token`, supply whatever current signed/proxied media URL your HA/Frigate automation already produces. Do not place a long-lived camera username/password in the HomeBack payload.
+SSH is no longer the selected runtime automation transport. It remains useful for setup, token retrieval/rotation, direct `luna-send` diagnosis and recovery. The HTTP path deliberately exposes only authenticated `GET /status` and `POST /notification/createPreviewToast`; it is not a generic Luna proxy or app-launch API.
 
 ## Configuring remote buttons
 

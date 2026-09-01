@@ -1,29 +1,52 @@
 import { readLaunchPointIcon, type IconRequest } from './app-catalog';
 import { HomeBackBootstrap } from './bootstrap';
 import { Service } from './bus';
-import { APPLICATION_MANAGER_URI, APP_ID, SERVICE_ID } from './environment';
+import { APPLICATION_MANAGER_URI, APP_ID, APP_VERSION, SERVICE_ID } from './environment';
+import { HttpPreviewServer } from './http-server';
 import {
 	buildPreviewToastRequest,
 	PreviewNotificationState,
 	type PreviewNotificationRequest,
 } from './notification';
+import { PreviewNotificationService } from './preview-notification-service';
 import { getUid } from './utils';
 
 const NOTIFICATION_URI = 'luna://com.webos.notification';
-const previewNotificationState = new PreviewNotificationState();
-
 const service = new Service();
+const previewNotificationState = new PreviewNotificationState();
+const previewNotificationService = new PreviewNotificationService(
+	previewNotificationState,
+	SERVICE_ID,
+	toast => service.oneshot(`${NOTIFICATION_URI}/createToast`, toast),
+	buildPreviewToastRequest,
+);
+const httpPreviewServer = new HttpPreviewServer({
+	version: APP_VERSION ?? 'unknown',
+	createPreviewNotification: request =>
+		previewNotificationService.createPreviewNotification(request),
+});
+
 const bootstrap = new HomeBackBootstrap(service);
 let shuttingDown = false;
+
+const serviceStatus = (): Record<string, unknown> => ({
+	...bootstrap.remoteInput.status(),
+	...httpPreviewServer.status(),
+});
 
 const shutdownService = (exitCode = 0): void => {
 	if (shuttingDown) return;
 	shuttingDown = true;
-	void bootstrap.remoteInput.stop()
-		.catch(error => {
-			console.error('Unable to cleanly stop HomeBack remote input:', error);
-		})
-		.finally(() => process.exit(exitCode));
+	const stopRemoteInput = bootstrap.remoteInput.stop().catch(error => {
+		console.error('Unable to cleanly stop HomeBack remote input:', error);
+	});
+	const stopHttp = httpPreviewServer.stop().catch(error => {
+		console.error(
+			'Unable to cleanly stop HomeBack HTTP Preview listener:',
+			error instanceof Error ? error.name : 'UnknownError',
+		);
+	});
+	void Promise.all([stopRemoteInput, stopHttp]).finally(() => process.exit(exitCode));
 };
 
 // `exit` is synchronous-only. Keep this as a last fail-open fallback if normal
@@ -43,6 +66,11 @@ const selfStartRemoteInput = async (): Promise<void> => {
 	}
 };
 
+const selfStartHttpPreview = async (): Promise<void> => {
+	if (getUid() !== 0) return;
+	await httpPreviewServer.start();
+};
+
 service.registerSimple<IconRequest>('/readIcon', async request => ({
 	done: true,
 	dataUrl: await readLaunchPointIcon(request ?? {}),
@@ -55,47 +83,17 @@ service.registerSimple('/bootstrap', async () => ({
 
 service.registerSimple('/remote/start', async () => {
 	await bootstrap.startRemoteInput();
-	return { done: true, status: bootstrap.remoteInput.status() };
+	return { done: true, status: serviceStatus() };
 });
 
 service.registerSimple('/remote/status', () => ({
 	done: true,
-	status: bootstrap.remoteInput.status(),
+	status: serviceStatus(),
 }));
 
-service.registerSimple<PreviewNotificationRequest>('/notification/createPreviewToast', async request => {
-	const normalizedRequest = request ?? {};
-	const prepared = previewNotificationState.prepare(normalizedRequest);
-
-	if (prepared.suppressed) {
-		return {
-			done: true,
-			suppressed: true,
-			cameraRegistered: Boolean(prepared.camera),
-		};
-	}
-
-	try {
-		await service.oneshot(
-			`${NOTIFICATION_URI}/createToast`,
-			buildPreviewToastRequest(normalizedRequest, SERVICE_ID),
-		);
-	} catch (error) {
-		if (prepared.reservedAt !== null) {
-			previewNotificationState.releaseToastReservation(
-				prepared.key,
-				prepared.reservedAt,
-			);
-		}
-		throw error;
-	}
-
-	return {
-		done: true,
-		suppressed: false,
-		cameraRegistered: Boolean(prepared.camera),
-	};
-});
+service.registerSimple<PreviewNotificationRequest>('/notification/createPreviewToast', request =>
+	previewNotificationService.createPreviewNotification(request ?? {}),
+);
 
 service.registerSimple('/cameras/list', () => ({
 	done: true,
@@ -139,4 +137,5 @@ if (__DEV__) {
 // @invariant: root-helper-self-start
 setTimeout(() => {
 	void selfStartRemoteInput();
+	void selfStartHttpPreview();
 }, 0);

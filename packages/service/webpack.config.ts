@@ -56,6 +56,7 @@ const config = (
 		new DefinePlugin({
 			__DEV__: JSON.stringify(argv.mode === 'development'),
 			'process.env.APP_ID': JSON.stringify(APP_ID),
+			'process.env.APP_VERSION': JSON.stringify(APP_VERSION),
 			'process.env.SERVICE_ID': JSON.stringify(SERVICE_ID),
 		}),
 		new CopyPlugin({

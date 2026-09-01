@@ -140,7 +140,6 @@ test('passive camera notifications use compact light-type toasts and queue-free 
 	assert.equal(service.includes('closeAlert'), false);
 	assert.equal(service.includes('runPreviewToastSerial'), false);
 	assert.equal(service.includes('previewToastQueues'), false);
-	assert.equal(service.includes('buildPreviewToastRequest(normalizedRequest, SERVICE_ID)'), true);
 	assert.equal(service.includes('TOAST_BRANDING'), false);
 	assert.equal(service.includes('/icon80.png'), false);
 	assert.equal(notification.includes("type: 'light'"), true);
@@ -149,7 +148,6 @@ test('passive camera notifications use compact light-type toasts and queue-free 
 	assert.equal(notification.includes('iconUrl'), false);
 	assert.equal(notification.includes("from './environment'"), false);
 	assert.equal(notification.includes('PreviewNotificationState'), true);
-	assert.equal(notification.includes('releaseToastReservation'), true);
 	assert.equal(notification.includes('per-camera Promise queue'), true);
 	assert.equal(notification.includes('result.length + point.length > maxLength'), true);
 });
