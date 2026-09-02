@@ -1,0 +1,48 @@
+name: Append weather reset documentation
+
+on:
+  push:
+    branches:
+      - fix/weather-capability-v2
+
+permissions:
+  contents: write
+
+jobs:
+  append:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/weather-capability-v2
+      - name: Update README
+        shell: bash
+        run: |
+          if ! grep -q '^## Weather capability reset$' README.md; then
+            cat >> README.md <<'EOF'
+
+          ## Weather capability reset
+
+          Stock-weather capability is machine state, not user configuration. HomeBack stores it at `/var/lib/homeback/weather-capability.json`, keyed by TV model, firmware version, webOS SDK version and HomeBack version. LG Weather Location is read dynamically and is not stored in that record.
+
+          To force stock-weather capability discovery again, delete the state file and restart the helper:
+
+          ```sh
+          rm -f /var/lib/homeback/weather-capability.json
+          luna-send -n 1 -f \
+            luna://com.homebrew.homeback.service/restartService \
+            '{}'
+          ```
+
+          See [`docs/WEATHER-STATUS-TILE.md`](./docs/WEATHER-STATUS-TILE.md) for probe, invalidation and fallback behavior.
+          EOF
+          fi
+      - name: Commit README and remove helper workflow
+        shell: bash
+        run: |
+          git rm .github/workflows/append-weather-readme.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add README.md
+          git commit -m "docs: add weather capability reset path"
+          git push origin HEAD:fix/weather-capability-v2
