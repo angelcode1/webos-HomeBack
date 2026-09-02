@@ -82,7 +82,6 @@ service.registerSimple<IconRequest>('/readIcon', async request => ({
 
 service.registerSimple('/bootstrap', async () => {
 	const result = await bootstrap.apply();
-	await weatherService.initialize();
 	return {
 		done: true,
 		...result,
