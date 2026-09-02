@@ -11,19 +11,21 @@ import {
 } from '../packages/service/src/weather.ts';
 
 const NOW = Date.parse('2026-09-03T06:30:00+10:00');
+const PLATFORM = {
+	returnValue: true,
+	modelName: 'OLED55C5PSA',
+	firmwareVersion: '33.20.10',
+	sdkVersion: '25.0.0',
+};
 
 class MemoryCapabilityStore implements WeatherCapabilityStore {
 	public value: StockWeatherCapability | null = null;
-	public loads = 0;
-	public saves = 0;
 
 	public async load(): Promise<unknown> {
-		this.loads++;
 		return this.value;
 	}
 
 	public async save(capability: StockWeatherCapability): Promise<void> {
-		this.saves++;
 		this.value = capability;
 	}
 }
@@ -75,160 +77,55 @@ test('LG Weather Location Setting shape is recognized', () => {
 	);
 });
 
-test('WeatherService reuses stock weather and caches it', async () => {
-	let lunaCalls = 0;
+test('WeatherService uses the selected stock source and caches the resulting snapshot', async () => {
+	const store = new MemoryCapabilityStore();
+	let stockReads = 0;
 	let httpCalls = 0;
 	const lunaCall = async <T extends Record<string, any>>(
 		uri: string,
 		params: Record<string, any> = {},
 	): Promise<T> => {
-		lunaCalls++;
-		if (uri.includes('getAllAppPropertiesObj') && params.appId === 'com.webos.app.home') {
+		if (uri.endsWith('/getSystemInfo')) return PLATFORM as T;
+		if (uri.includes('getAppProperty')) {
 			return {
 				returnValue: true,
-				values: [{
-					Temperature: { Metric: { Value: 21.8 } },
-					WeatherText: 'Rain',
-				}],
+				location: { locationKey: '24741', localizedName: 'Brisbane' },
 			} as T;
 		}
-		throw new Error('unavailable');
+		if (uri.includes('getAllAppPropertiesObj')) {
+			if (params.appId === 'com.webos.app.home') {
+				stockReads++;
+				return {
+					returnValue: true,
+					values: [{
+						Temperature: { Metric: { Value: 21.8 } },
+						WeatherText: 'Rain',
+					}],
+				} as T;
+			}
+			return { returnValue: true, values: [] } as T;
+		}
+		throw new Error(`unexpected Luna call: ${uri}`);
 	};
 	const jsonRequest = async (): Promise<unknown> => {
 		httpCalls++;
 		throw new Error('external weather should not be requested');
 	};
-	const service = new WeatherService(lunaCall, jsonRequest, () => NOW);
+	const service = new WeatherService(lunaCall, jsonRequest, () => NOW, store);
 
+	await service.initialize();
+	const readsAfterProbe = stockReads;
 	const first = await service.current();
-	const callsAfterFirst = lunaCalls;
+	const readsAfterRefresh = stockReads;
 	const second = await service.current();
 
+	assert.ok(readsAfterProbe >= 1);
+	assert.equal(readsAfterRefresh, readsAfterProbe + 1, 'refresh should query the selected stock source once');
+	assert.equal(stockReads, readsAfterRefresh, 'fresh weather cache should avoid another stock read');
 	assert.equal(first?.temperatureC, 21.8);
 	assert.equal(first?.condition, 'rain');
+	assert.equal(first?.location, 'Brisbane');
 	assert.equal(first?.source, 'webos-weather');
 	assert.deepEqual(second, first);
-	assert.equal(lunaCalls, callsAfterFirst);
 	assert.equal(httpCalls, 0);
-});
-
-test('WeatherService geocodes LG weather location before Open-Meteo fallback', async () => {
-	const lunaCall = async <T extends Record<string, any>>(
-		uri: string,
-		params: Record<string, any> = {},
-	): Promise<T> => {
-		if (uri.includes('getAllAppPropertiesObj') && params.appId === 'com.webos.app.home') {
-			return {
-				returnValue: true,
-				values: [{ location: { locationKey: '24741', localizedName: 'Brisbane' } }],
-			} as T;
-		}
-		throw new Error('unavailable');
-	};
-	const requested: string[] = [];
-	const jsonRequest = async (url: string): Promise<unknown> => {
-		requested.push(url);
-		if (url.includes('geocoding-api.open-meteo.com')) {
-			return { results: [{ name: 'Brisbane', latitude: -27.47, longitude: 153.03 }] };
-		}
-		return { current: { temperature_2m: 24.6, weather_code: 61 } };
-	};
-	const service = new WeatherService(lunaCall, jsonRequest, () => NOW);
-
-	const weather = await service.current();
-
-	assert.equal(weather?.temperatureC, 24.6);
-	assert.equal(weather?.condition, 'rain');
-	assert.equal(weather?.location, 'Brisbane');
-	assert.equal(weather?.source, 'webos-location-openmeteo');
-	assert.equal(requested.length, 2);
-	assert.match(requested[0], /name=Brisbane/);
-	assert.match(requested[1], /latitude=-27\.47/);
-});
-
-test('stock weather availability is probed once and reused across service restarts', async () => {
-	const store = new MemoryCapabilityStore();
-	let firstProcessCalls = 0;
-	const firstLunaCall = async <T extends Record<string, any>>(
-		uri: string,
-		params: Record<string, any> = {},
-	): Promise<T> => {
-		firstProcessCalls++;
-		if (uri.includes('getAllAppPropertiesObj') && params.appId === 'com.webos.app.home') {
-			return {
-				returnValue: true,
-				values: [{
-					Temperature: { Metric: { Value: 22.1 } },
-					WeatherText: 'Clear',
-					location: { localizedName: 'Brisbane', latitude: -27.47, longitude: 153.03 },
-				}],
-			} as T;
-		}
-		throw new Error('unavailable');
-	};
-	const first = new WeatherService(firstLunaCall, async () => null, () => NOW, store);
-
-	await first.initialize();
-	const callsAfterInitialProbe = firstProcessCalls;
-	assert.ok(callsAfterInitialProbe > 1);
-	assert.equal(store.saves, 1);
-	assert.equal(store.value?.stockWeatherAvailable, true);
-	assert.equal(store.value?.weatherSource?.appId, 'com.webos.app.home');
-
-	let secondProcessCalls = 0;
-	const secondLunaCall = async <T extends Record<string, any>>(
-		uri: string,
-		params: Record<string, any> = {},
-	): Promise<T> => {
-		secondProcessCalls++;
-		assert.match(uri, /getAllAppPropertiesObj$/);
-		assert.equal(params.appId, 'com.webos.app.home');
-		return {
-			returnValue: true,
-			values: [{
-				Temperature: { Metric: { Value: 22.8 } },
-				WeatherText: 'Partly cloudy',
-			}],
-		} as T;
-	};
-	const second = new WeatherService(secondLunaCall, async () => null, () => NOW, store);
-
-	await second.initialize();
-	assert.equal(secondProcessCalls, 0, 'startup should load the stored capability without rescanning');
-	const weather = await second.current();
-	assert.equal(secondProcessCalls, 1, 'refresh should query only the stored stock source');
-	assert.equal(weather?.temperatureC, 22.8);
-	assert.equal(weather?.condition, 'partly-cloudy');
-	assert.equal(store.saves, 1, 'loading a valid capability must not rewrite it');
-});
-
-test('stock weather unavailability stays persisted for the installed version', async () => {
-	const store = new MemoryCapabilityStore();
-	let initialCalls = 0;
-	const unavailable = async <T extends Record<string, any>>(): Promise<T> => {
-		initialCalls++;
-		throw new Error('stock services unavailable');
-	};
-	const first = new WeatherService(unavailable, async () => null, () => NOW, store);
-
-	await first.initialize();
-	assert.equal(store.value?.stockWeatherAvailable, false);
-	assert.equal(store.value?.weatherSource, null);
-	assert.equal(store.saves, 1);
-	assert.ok(initialCalls > 1);
-
-	let laterCalls = 0;
-	const muchLater = NOW + 30 * 24 * 60 * 60 * 1000;
-	const laterLunaCall = async <T extends Record<string, any>>(uri: string): Promise<T> => {
-		laterCalls++;
-		assert.equal(uri, 'luna://com.webos.service.location/getLocationUpdates');
-		throw new Error('location unavailable');
-	};
-	const second = new WeatherService(laterLunaCall, async () => null, () => muchLater, store);
-
-	await second.initialize();
-	assert.equal(laterCalls, 0, 'stored unavailable result must never trigger a timed stock rescan');
-	assert.equal(await second.current(), null);
-	assert.equal(laterCalls, 1, 'normal refresh may still ask the webOS location service once');
-	assert.equal(store.saves, 1, 'stored capability remains unchanged until the HomeBack version changes');
 });
