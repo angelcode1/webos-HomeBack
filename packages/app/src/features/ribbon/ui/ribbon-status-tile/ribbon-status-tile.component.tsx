@@ -119,7 +119,9 @@ export const RibbonStatusTile = observer(({ visible }: { visible: boolean }): JS
 	useEffect(() => {
 		if (!visible) return undefined;
 		void weatherService.refresh();
-		const timer = setInterval(() => void weatherService.refresh(), WEATHER_POLL_MS);
+		const timer = setInterval(() => {
+			void weatherService.refresh();
+		}, WEATHER_POLL_MS);
 		return () => clearInterval(timer);
 	}, [visible]);
 
