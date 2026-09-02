@@ -10,10 +10,12 @@ const ribbonStyles = readFileSync(
 	'packages/app/src/features/ribbon/ui/ribbon/ribbon.module.scss',
 	'utf8',
 );
+const appServicesSource = readFileSync('packages/app/src/shared/services/services.ts', 'utf8');
 const serviceSource = readFileSync('packages/service/src/index.ts', 'utf8');
 
-test('weather hotfix keeps the optional status tile out of the launcher render path', () => {
+test('weather hotfix keeps weather out of the web-app startup and launcher render paths', () => {
 	assert.doesNotMatch(ribbonSource, /RibbonStatusTile/);
+	assert.doesNotMatch(appServicesSource, /WeatherService|weatherService/);
 	assert.match(ribbonStyles, /inset:\s*0;/);
 	assert.doesNotMatch(ribbonStyles, /inset:\s*0\s+194px\s+0\s+0/);
 });
