@@ -75,23 +75,19 @@ const selfStartHttpPreview = async (): Promise<void> => {
 	await httpPreviewServer.start();
 };
 
-const selfStartWeatherCapability = async (): Promise<void> => {
-	try {
-		await weatherService.initialize();
-	} catch (error) {
-		console.warn('[HomeBackWeather] initial capability probe failed', error);
-	}
-};
-
 service.registerSimple<IconRequest>('/readIcon', async request => ({
 	done: true,
 	dataUrl: await readLaunchPointIcon(request ?? {}),
 }));
 
-service.registerSimple('/bootstrap', async () => ({
-	done: true,
-	...(await bootstrap.apply()),
-}));
+service.registerSimple('/bootstrap', async () => {
+	const result = await bootstrap.apply();
+	await weatherService.initialize();
+	return {
+		done: true,
+		...result,
+	};
+});
 
 service.registerSimple('/remote/start', async () => {
 	await bootstrap.startRemoteInput();
@@ -153,7 +149,6 @@ if (__DEV__) {
 
 // @invariant: root-helper-self-start
 setTimeout(() => {
-	void selfStartWeatherCapability();
 	void selfStartRemoteInput();
 	void selfStartHttpPreview();
 }, 0);
