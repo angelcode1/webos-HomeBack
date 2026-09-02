@@ -29,6 +29,8 @@ class MemoryCapabilityStore implements WeatherCapabilityStore {
 	}
 }
 
+// A negative capability is cacheable only when every relevant service-root
+// observation is conclusive; an unregistered root can still be an early-boot race.
 test('a temporarily unregistered preference root blocks negative capability persistence', async () => {
 	const store = new MemoryCapabilityStore();
 	let palmCalls = 0;
