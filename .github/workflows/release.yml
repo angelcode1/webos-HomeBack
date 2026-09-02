@@ -169,7 +169,7 @@ jobs:
               --generate-notes
           fi
 
-      - name: Persist released Homebrew catalog indexes
+      - name: Stage released Homebrew catalog indexes for protected-main PR
         if: ${{ inputs.source_ref == 'main' }}
         run: |
           node scripts/verify-catalog.cjs
@@ -186,9 +186,19 @@ jobs:
           git fetch origin main
           CURRENT_MAIN="$(git rev-parse origin/main)"
           if [ "$CURRENT_MAIN" != "$SOURCE_SHA" ]; then
-            echo "Catalog persistence blocked: main moved from $SOURCE_SHA to $CURRENT_MAIN during release."
-            echo "Release assets are published, but the generated catalog commit was not pushed."
+            echo "Catalog staging blocked: main moved from $SOURCE_SHA to $CURRENT_MAIN during release."
+            echo "Release assets are published, but the generated catalog commit was not staged."
             exit 1
           fi
 
-          git push origin HEAD:main
+          CATALOG_BRANCH="release/catalog-v${VERSION}"
+          if git ls-remote --exit-code --heads origin "$CATALOG_BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$CATALOG_BRANCH:refs/remotes/origin/$CATALOG_BRANCH"
+            EXPECTED_REMOTE="$(git rev-parse "refs/remotes/origin/$CATALOG_BRANCH")"
+            git push --force-with-lease="${CATALOG_BRANCH}:${EXPECTED_REMOTE}" origin HEAD:"refs/heads/${CATALOG_BRANCH}"
+          else
+            git push origin HEAD:"refs/heads/${CATALOG_BRANCH}"
+          fi
+
+          echo "Released catalog commit staged on ${CATALOG_BRANCH}."
+          echo "Merge that branch to main through the normal protected pull-request path."
