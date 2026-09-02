@@ -168,3 +168,27 @@ jobs:
               --title "HomeBack ${VERSION}" \
               --generate-notes
           fi
+
+      - name: Persist released Homebrew catalog indexes
+        if: ${{ inputs.source_ref == 'main' }}
+        run: |
+          node scripts/verify-catalog.cjs
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add repo.json webosbrew/index.json
+
+          if git diff --cached --quiet; then
+            echo "Catalog indexes already match the released artifact."
+            exit 0
+          fi
+
+          git commit -m "Publish HomeBack ${VERSION} catalogs"
+          git fetch origin main
+          CURRENT_MAIN="$(git rev-parse origin/main)"
+          if [ "$CURRENT_MAIN" != "$SOURCE_SHA" ]; then
+            echo "Catalog persistence blocked: main moved from $SOURCE_SHA to $CURRENT_MAIN during release."
+            echo "Release assets are published, but the generated catalog commit was not pushed."
+            exit 1
+          fi
+
+          git push origin HEAD:main
