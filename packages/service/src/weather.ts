@@ -2,12 +2,15 @@ import { get as httpsGet } from 'https';
 
 import { isPlainObject, type WeatherCondition, type WeatherSnapshot } from '@homeback/utils';
 
-import { APP_VERSION } from './environment';
-import { readJson, writeJson } from './utils';
+import { APP_VERSION } from './environment.ts';
+import { readJson, writeJson } from './utils.ts';
 
 const WEATHER_CACHE_MS = 20 * 60 * 1000;
 const WEATHER_STALE_MS = 2 * 60 * 60 * 1000;
 const WEATHER_RETRY_MS = 5 * 60 * 1000;
+const STOCK_SOURCE_CAPABILITY_TTL_MS = 6 * 60 * 60 * 1000;
+const LOCATION_ONLY_CAPABILITY_TTL_MS = 60 * 60 * 1000;
+const NEGATIVE_CAPABILITY_TTL_MS = 15 * 60 * 1000;
 const LUNA_PROBE_TIMEOUT_MS = 1_500;
 const LOCATION_TIMEOUT_MS = 6_500;
 const HTTP_TIMEOUT_MS = 5_000;
@@ -22,6 +25,8 @@ const PREFERENCE_SERVICE_ROOTS = [
 const STOCK_WEATHER_APP_IDS = [
 	'com.webos.app.home',
 	'com.webos.app.lifeonscreen',
+	'com.webos.app.igallery',
+	'com.webos.app.weatherlocation',
 ] as const;
 const WEBOS_LOCATION_URI = 'luna://com.webos.service.location/getLocationUpdates';
 
@@ -166,7 +171,7 @@ const conditionFromAccuWeatherIcon = (value: unknown): WeatherCondition => {
 	if ([7, 8].includes(icon)) return 'cloudy';
 	if (icon === 11) return 'fog';
 	if ([15, 16, 17, 41, 42].includes(icon)) return 'storm';
-	if ([18].includes(icon)) return 'heavy-rain';
+	if (icon === 18) return 'heavy-rain';
 	if ([12, 13, 14, 39, 40].includes(icon)) return 'rain';
 	if (icon >= 19 && icon <= 29) return 'snow';
 	if ([43, 44].includes(icon)) return 'snow';
@@ -279,9 +284,10 @@ const validWeatherLocation = (value: unknown): WeatherLocation | null => {
 
 const validStockWeatherSource = (value: unknown): StockWeatherSource | null => {
 	if (!isPlainObject(value)) return null;
-	if (typeof value.root !== 'string' || !PREFERENCE_SERVICE_ROOTS.includes(value.root as any)) return null;
-	if (typeof value.appId !== 'string' || !STOCK_WEATHER_APP_IDS.includes(value.appId as any)) return null;
-	return { root: value.root, appId: value.appId };
+	if (typeof value.root !== 'string' || typeof value.appId !== 'string') return null;
+	const root = PREFERENCE_SERVICE_ROOTS.find(candidate => candidate === value.root);
+	const appId = STOCK_WEATHER_APP_IDS.find(candidate => candidate === value.appId);
+	return root && appId ? { root, appId } : null;
 };
 
 export const parseStockWeatherCapability = (value: unknown): StockWeatherCapability | null => {
@@ -303,6 +309,20 @@ export const parseStockWeatherCapability = (value: unknown): StockWeatherCapabil
 		weatherSource,
 		weatherLocation,
 	};
+};
+
+const capabilityTtl = (capability: StockWeatherCapability): number => {
+	if (capability.weatherSource) return STOCK_SOURCE_CAPABILITY_TTL_MS;
+	if (capability.weatherLocation) return LOCATION_ONLY_CAPABILITY_TTL_MS;
+	return NEGATIVE_CAPABILITY_TTL_MS;
+};
+
+export const isStockWeatherCapabilityFresh = (
+	capability: StockWeatherCapability,
+	now = Date.now(),
+): boolean => {
+	const age = now - capability.checkedAt;
+	return age >= 0 && age < capabilityTtl(capability);
 };
 
 export const requestJson = (url: string, timeoutMs = HTTP_TIMEOUT_MS): Promise<unknown> =>
@@ -362,26 +382,34 @@ export class WeatherService {
 		await this.ensureStockCapability();
 	}
 
-	public async current(): Promise<WeatherSnapshot | null> {
+	public current(): Promise<WeatherSnapshot | null> {
 		const now = this.now();
-		if (this.cache && now - this.cachedAt < WEATHER_CACHE_MS) return this.cache;
+		if (this.cache && now - this.cachedAt < WEATHER_CACHE_MS) return Promise.resolve(this.cache);
 		if (this.refreshPromise) return this.refreshPromise;
-		if (now < this.nextRetryAt) return this.staleCache(now);
+		if (now < this.nextRetryAt) return Promise.resolve(this.staleCache(now));
 
-		this.refreshPromise = this.refresh();
+		const refresh = this.refreshAndCache();
+		this.refreshPromise = refresh;
+		refresh.finally(() => {
+			if (this.refreshPromise === refresh) this.refreshPromise = null;
+		}).catch(() => undefined);
+		return refresh;
+	}
+
+	private async refreshAndCache(): Promise<WeatherSnapshot | null> {
 		try {
-			const weather = await this.refreshPromise;
+			const weather = await this.refresh();
 			if (weather) {
 				this.cache = weather;
 				this.cachedAt = this.now();
 				this.nextRetryAt = 0;
 				return weather;
 			}
-			this.nextRetryAt = this.now() + WEATHER_RETRY_MS;
-			return this.staleCache(this.now());
-		} finally {
-			this.refreshPromise = null;
+		} catch (error) {
+			console.warn('[HomeBackWeather] refresh failed', error instanceof Error ? error.message : error);
 		}
+		this.nextRetryAt = this.now() + WEATHER_RETRY_MS;
+		return this.staleCache(this.now());
 	}
 
 	private staleCache(now: number): WeatherSnapshot | null {
@@ -411,8 +439,10 @@ export class WeatherService {
 	}
 
 	private async ensureStockCapability(): Promise<StockWeatherCapability> {
-		if (this.capability) return this.capability;
+		const now = this.now();
+		if (this.capability && isStockWeatherCapabilityFresh(this.capability, now)) return this.capability;
 		if (this.capabilityPromise) return this.capabilityPromise;
+		this.capability = null;
 
 		this.capabilityPromise = this.loadOrProbeStockCapability();
 		try {
@@ -426,7 +456,7 @@ export class WeatherService {
 	private async loadOrProbeStockCapability(): Promise<StockWeatherCapability> {
 		try {
 			const stored = parseStockWeatherCapability(await this.capabilityStore.load());
-			if (stored) return stored;
+			if (stored && isStockWeatherCapabilityFresh(stored, this.now())) return stored;
 		} catch (error) {
 			console.warn('[HomeBackWeather] stock capability cache load failed', error);
 		}
@@ -458,7 +488,6 @@ export class WeatherService {
 
 		if (!weatherLocation) {
 			const locationPayloads = await Promise.all(candidates.map(async source => ({
-				source,
 				payload: await this.readLocationProperty(source.root, source.appId),
 			})));
 			for (const { payload } of locationPayloads) {
