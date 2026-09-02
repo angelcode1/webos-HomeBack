@@ -75,6 +75,14 @@ const selfStartHttpPreview = async (): Promise<void> => {
 	await httpPreviewServer.start();
 };
 
+const selfStartWeatherCapability = async (): Promise<void> => {
+	try {
+		await weatherService.initialize();
+	} catch (error) {
+		console.warn('[HomeBackWeather] initial capability probe failed', error);
+	}
+};
+
 service.registerSimple<IconRequest>('/readIcon', async request => ({
 	done: true,
 	dataUrl: await readLaunchPointIcon(request ?? {}),
@@ -145,6 +153,7 @@ if (__DEV__) {
 
 // @invariant: root-helper-self-start
 setTimeout(() => {
+	void selfStartWeatherCapability();
 	void selfStartRemoteInput();
 	void selfStartHttpPreview();
 }, 0);
