@@ -2,6 +2,9 @@ import { get as httpsGet } from 'https';
 
 import { isPlainObject, type WeatherCondition, type WeatherSnapshot } from '@homeback/utils';
 
+import { APP_VERSION } from './environment';
+import { readJson, writeJson } from './utils';
+
 const WEATHER_CACHE_MS = 20 * 60 * 1000;
 const WEATHER_STALE_MS = 2 * 60 * 60 * 1000;
 const WEATHER_RETRY_MS = 5 * 60 * 1000;
@@ -9,6 +12,8 @@ const LUNA_PROBE_TIMEOUT_MS = 1_500;
 const LOCATION_TIMEOUT_MS = 6_500;
 const HTTP_TIMEOUT_MS = 5_000;
 const MAX_RESPONSE_BYTES = 256 * 1024;
+const STOCK_CAPABILITY_SCHEMA_VERSION = 1;
+const STOCK_CAPABILITY_PATH = '/home/root/.config/homeback/weather-capability.json';
 
 const PREFERENCE_SERVICE_ROOTS = [
 	'luna://com.palm.preferences',
@@ -34,10 +39,57 @@ type WeatherLocation = {
 	name?: string;
 };
 
-type StockState = {
-	weather: WeatherSnapshot | null;
-	location: WeatherLocation | null;
+type StockWeatherSource = {
+	root: string;
+	appId: string;
 };
+
+export type StockWeatherCapability = {
+	schemaVersion: 1;
+	appVersion: string;
+	checkedAt: number;
+	stockWeatherAvailable: boolean;
+	weatherSource: StockWeatherSource | null;
+	weatherLocation: WeatherLocation | null;
+};
+
+export interface WeatherCapabilityStore {
+	load(): Promise<unknown>;
+	save(capability: StockWeatherCapability): Promise<void>;
+}
+
+class FileWeatherCapabilityStore implements WeatherCapabilityStore {
+	public async load(): Promise<unknown> {
+		try {
+			return await readJson<unknown>(STOCK_CAPABILITY_PATH);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+				console.warn('[HomeBackWeather] unable to read stock capability cache', error);
+			}
+			return null;
+		}
+	}
+
+	public async save(capability: StockWeatherCapability): Promise<void> {
+		await writeJson(STOCK_CAPABILITY_PATH, capability, 0o600);
+	}
+}
+
+class MemoryWeatherCapabilityStore implements WeatherCapabilityStore {
+	private value: StockWeatherCapability | null = null;
+
+	public async load(): Promise<unknown> {
+		return this.value;
+	}
+
+	public async save(capability: StockWeatherCapability): Promise<void> {
+		this.value = capability;
+	}
+}
+
+const currentAppVersion = (): string => APP_VERSION ?? 'unknown';
+const defaultCapabilityStore = (): WeatherCapabilityStore =>
+	APP_VERSION ? new FileWeatherCapabilityStore() : new MemoryWeatherCapabilityStore();
 
 const finiteNumber = (value: unknown): number | null => {
 	if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -217,6 +269,42 @@ export const extractWeatherLocation = (value: unknown): WeatherLocation | null =
 	return null;
 };
 
+const validWeatherLocation = (value: unknown): WeatherLocation | null => {
+	if (!isPlainObject(value)) return null;
+	const coordinates = latitudeLongitudeFromRecord(value);
+	const name = typeof value.name === 'string' && value.name.trim() ? value.name.trim() : undefined;
+	if (!coordinates && !name) return null;
+	return { ...(coordinates ?? {}), ...(name ? { name } : {}) };
+};
+
+const validStockWeatherSource = (value: unknown): StockWeatherSource | null => {
+	if (!isPlainObject(value)) return null;
+	if (typeof value.root !== 'string' || !PREFERENCE_SERVICE_ROOTS.includes(value.root as any)) return null;
+	if (typeof value.appId !== 'string' || !STOCK_WEATHER_APP_IDS.includes(value.appId as any)) return null;
+	return { root: value.root, appId: value.appId };
+};
+
+export const parseStockWeatherCapability = (value: unknown): StockWeatherCapability | null => {
+	if (!isPlainObject(value)) return null;
+	if (value.schemaVersion !== STOCK_CAPABILITY_SCHEMA_VERSION) return null;
+	if (value.appVersion !== currentAppVersion()) return null;
+	if (typeof value.checkedAt !== 'number' || !Number.isFinite(value.checkedAt)) return null;
+	if (typeof value.stockWeatherAvailable !== 'boolean') return null;
+	const weatherSource = value.weatherSource === null ? null : validStockWeatherSource(value.weatherSource);
+	if (value.weatherSource !== null && !weatherSource) return null;
+	if (value.stockWeatherAvailable !== Boolean(weatherSource)) return null;
+	const weatherLocation = value.weatherLocation === null ? null : validWeatherLocation(value.weatherLocation);
+	if (value.weatherLocation !== null && !weatherLocation) return null;
+	return {
+		schemaVersion: 1,
+		appVersion: value.appVersion,
+		checkedAt: value.checkedAt,
+		stockWeatherAvailable: value.stockWeatherAvailable,
+		weatherSource,
+		weatherLocation,
+	};
+};
+
 export const requestJson = (url: string, timeoutMs = HTTP_TIMEOUT_MS): Promise<unknown> =>
 	new Promise((resolve, reject) => {
 		const request = httpsGet(
@@ -260,12 +348,19 @@ export class WeatherService {
 	private cachedAt = 0;
 	private nextRetryAt = 0;
 	private refreshPromise: Promise<WeatherSnapshot | null> | null = null;
+	private capability: StockWeatherCapability | null = null;
+	private capabilityPromise: Promise<StockWeatherCapability> | null = null;
 
 	public constructor(
 		private readonly lunaCall: LunaCall,
 		private readonly jsonRequest: JsonRequest = requestJson,
 		private readonly now: () => number = Date.now,
+		private readonly capabilityStore: WeatherCapabilityStore = defaultCapabilityStore(),
 	) {}
+
+	public async initialize(): Promise<void> {
+		await this.ensureStockCapability();
+	}
 
 	public async current(): Promise<WeatherSnapshot | null> {
 		const now = this.now();
@@ -295,16 +390,19 @@ export class WeatherService {
 	}
 
 	private async refresh(): Promise<WeatherSnapshot | null> {
-		const stock = await this.readStockState();
-		if (stock.weather) return stock.weather;
+		const capability = await this.ensureStockCapability();
+		if (capability.weatherSource) {
+			const payload = await this.readAppProperties(
+				capability.weatherSource.root,
+				capability.weatherSource.appId,
+			);
+			const stockWeather = extractStockWeather(payload, this.now());
+			if (stockWeather) return stockWeather;
+		}
 
-		const preferredLocation = stock.location;
+		const preferredLocation = await this.resolveStoredWeatherLocation(capability);
 		if (preferredLocation?.latitude !== undefined && preferredLocation.longitude !== undefined) {
 			return this.fetchOpenMeteo(preferredLocation);
-		}
-		if (preferredLocation?.name) {
-			const resolved = await this.geocode(preferredLocation.name);
-			if (resolved) return this.fetchOpenMeteo({ ...resolved, name: preferredLocation.name });
 		}
 
 		const webosLocation = await this.readWebosLocation();
@@ -312,31 +410,97 @@ export class WeatherService {
 		return null;
 	}
 
-	private async readStockState(): Promise<StockState> {
-		const payloads = await Promise.all(
-			PREFERENCE_SERVICE_ROOTS.flatMap(root =>
-				STOCK_WEATHER_APP_IDS.map(appId => this.readAppProperties(root, appId)),
-			),
-		);
+	private async ensureStockCapability(): Promise<StockWeatherCapability> {
+		if (this.capability) return this.capability;
+		if (this.capabilityPromise) return this.capabilityPromise;
 
-		let location: WeatherLocation | null = null;
-		for (const payload of payloads) {
+		this.capabilityPromise = this.loadOrProbeStockCapability();
+		try {
+			this.capability = await this.capabilityPromise;
+			return this.capability;
+		} finally {
+			this.capabilityPromise = null;
+		}
+	}
+
+	private async loadOrProbeStockCapability(): Promise<StockWeatherCapability> {
+		try {
+			const stored = parseStockWeatherCapability(await this.capabilityStore.load());
+			if (stored) return stored;
+		} catch (error) {
+			console.warn('[HomeBackWeather] stock capability cache load failed', error);
+		}
+
+		const capability = await this.probeStockCapability();
+		await this.persistCapability(capability);
+		console.log(
+			`[HomeBackWeather] stock weather ${capability.stockWeatherAvailable ? 'available' : 'unavailable'}; capability cached`,
+		);
+		return capability;
+	}
+
+	private async probeStockCapability(): Promise<StockWeatherCapability> {
+		const candidates = PREFERENCE_SERVICE_ROOTS.flatMap(root =>
+			STOCK_WEATHER_APP_IDS.map(appId => ({ root, appId })),
+		);
+		const appPayloads = await Promise.all(candidates.map(async source => ({
+			source,
+			payload: await this.readAppProperties(source.root, source.appId),
+		})));
+
+		let weatherSource: StockWeatherSource | null = null;
+		let weatherLocation: WeatherLocation | null = null;
+		for (const { source, payload } of appPayloads) {
 			if (!payload) continue;
-			const weather = extractStockWeather(payload, this.now());
-			if (weather) return { weather, location: extractWeatherLocation(payload) };
-			location ??= extractWeatherLocation(payload);
+			if (!weatherSource && extractStockWeather(payload, this.now())) weatherSource = source;
+			weatherLocation ??= extractWeatherLocation(payload);
 		}
-		if (location) return { weather: null, location };
 
-		const locationPayloads = await Promise.all(
-			PREFERENCE_SERVICE_ROOTS.flatMap(root =>
-				STOCK_WEATHER_APP_IDS.map(appId => this.readLocationProperty(root, appId)),
-			),
-		);
-		for (const payload of locationPayloads) {
-			location ??= extractWeatherLocation(payload);
+		if (!weatherLocation) {
+			const locationPayloads = await Promise.all(candidates.map(async source => ({
+				source,
+				payload: await this.readLocationProperty(source.root, source.appId),
+			})));
+			for (const { payload } of locationPayloads) {
+				weatherLocation ??= extractWeatherLocation(payload);
+			}
 		}
-		return { weather: null, location };
+
+		return {
+			schemaVersion: 1,
+			appVersion: currentAppVersion(),
+			checkedAt: this.now(),
+			stockWeatherAvailable: weatherSource !== null,
+			weatherSource,
+			weatherLocation,
+		};
+	}
+
+	private async persistCapability(capability: StockWeatherCapability): Promise<void> {
+		this.capability = capability;
+		try {
+			await this.capabilityStore.save(capability);
+		} catch (error) {
+			console.warn('[HomeBackWeather] unable to persist stock capability cache', error);
+		}
+	}
+
+	private async resolveStoredWeatherLocation(
+		capability: StockWeatherCapability,
+	): Promise<WeatherLocation | null> {
+		const location = capability.weatherLocation;
+		if (!location) return null;
+		if (location.latitude !== undefined && location.longitude !== undefined) return location;
+		if (!location.name) return null;
+
+		const resolved = await this.geocode(location.name);
+		if (!resolved) return null;
+		const updated = {
+			...capability,
+			weatherLocation: { ...resolved, name: location.name },
+		};
+		await this.persistCapability(updated);
+		return updated.weatherLocation;
 	}
 
 	private async readAppProperties(root: string, appId: string): Promise<Record<string, unknown> | null> {
