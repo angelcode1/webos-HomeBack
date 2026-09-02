@@ -536,3 +536,18 @@ The first dependency resolution creates `yarn.lock` if it is not already present
 ---
 
 HomeBack is an independent community project and is not affiliated with or endorsed by LG Electronics.
+
+## Weather capability reset
+
+Stock-weather capability is machine state, not user configuration. HomeBack stores it at `/var/lib/homeback/weather-capability.json`, keyed by TV model, firmware version, webOS SDK version and HomeBack version. LG Weather Location is read dynamically and is not stored in that record.
+
+To force stock-weather capability discovery again, delete the state file and restart the helper:
+
+```sh
+rm -f /var/lib/homeback/weather-capability.json
+luna-send -n 1 -f \
+  luna://com.homebrew.homeback.service/restartService \
+  '{}'
+```
+
+See [`docs/WEATHER-STATUS-TILE.md`](./docs/WEATHER-STATUS-TILE.md) for probe, invalidation and fallback behavior.
