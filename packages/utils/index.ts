@@ -14,3 +14,4 @@ export {
 	type MicomColour,
 } from './micom-keycodes.ts';
 export { clampInteger, isPlainObject, normalizedText } from './value.ts';
+export type { WeatherCondition, WeatherSnapshot, WeatherSource } from './weather.ts';

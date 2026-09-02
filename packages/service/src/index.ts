@@ -10,9 +10,13 @@ import {
 } from './notification';
 import { PreviewNotificationService } from './preview-notification-service';
 import { getUid } from './utils';
+import { WeatherService } from './weather';
 
 const NOTIFICATION_URI = 'luna://com.webos.notification';
 const service = new Service();
+const weatherService = new WeatherService((uri, params, timeoutMs) =>
+	service.oneshot(uri, params, timeoutMs),
+);
 const previewNotificationState = new PreviewNotificationState();
 const previewNotificationService = new PreviewNotificationService(
 	previewNotificationState,
@@ -76,10 +80,14 @@ service.registerSimple<IconRequest>('/readIcon', async request => ({
 	dataUrl: await readLaunchPointIcon(request ?? {}),
 }));
 
-service.registerSimple('/bootstrap', async () => ({
-	done: true,
-	...(await bootstrap.apply()),
-}));
+service.registerSimple('/bootstrap', async () => {
+	const result = await bootstrap.apply();
+	await weatherService.initialize();
+	return {
+		done: true,
+		...result,
+	};
+});
 
 service.registerSimple('/remote/start', async () => {
 	await bootstrap.startRemoteInput();
@@ -89,6 +97,11 @@ service.registerSimple('/remote/start', async () => {
 service.registerSimple('/remote/status', () => ({
 	done: true,
 	status: serviceStatus(),
+}));
+
+service.registerSimple('/weather/current', async () => ({
+	done: true,
+	weather: await weatherService.current(),
 }));
 
 service.registerSimple<PreviewNotificationRequest>('/notification/createPreviewToast', request =>
