@@ -202,7 +202,7 @@ test('stock weather availability is probed once and reused across service restar
 	assert.equal(store.saves, 1, 'loading a valid capability must not rewrite it');
 });
 
-test('stock weather unavailability is persisted and prevents later rescans', async () => {
+test('fresh stock weather unavailability avoids immediate rescans', async () => {
 	const store = new MemoryCapabilityStore();
 	let initialCalls = 0;
 	const unavailable = async <T extends Record<string, any>>(): Promise<T> => {
@@ -226,7 +226,44 @@ test('stock weather unavailability is persisted and prevents later rescans', asy
 	const second = new WeatherService(laterLunaCall, async () => null, () => NOW, store);
 
 	await second.initialize();
-	assert.equal(laterCalls, 0, 'stored unavailable result must avoid stock capability scanning');
+	assert.equal(laterCalls, 0, 'fresh unavailable result must avoid stock capability scanning');
 	assert.equal(await second.current(), null);
 	assert.equal(laterCalls, 1, 'normal refresh may still ask the webOS location service once');
+});
+
+test('expired negative stock capability is re-probed and can recover', async () => {
+	const store = new MemoryCapabilityStore();
+	store.value = {
+		schemaVersion: 1,
+		appVersion: 'unknown',
+		checkedAt: NOW,
+		stockWeatherAvailable: false,
+		weatherSource: null,
+		weatherLocation: null,
+	};
+	const later = NOW + 16 * 60 * 1000;
+	let calls = 0;
+	const recoveredLunaCall = async <T extends Record<string, any>>(
+		uri: string,
+		params: Record<string, any> = {},
+	): Promise<T> => {
+		calls++;
+		if (uri.includes('getAllAppPropertiesObj') && params.appId === 'com.webos.app.home') {
+			return {
+				returnValue: true,
+				values: [{
+					Temperature: { Metric: { Value: 25.2 } },
+					WeatherText: 'Sunny',
+				}],
+			} as T;
+		}
+		throw new Error('unavailable');
+	};
+	const service = new WeatherService(recoveredLunaCall, async () => null, () => later, store);
+
+	await service.initialize();
+	assert.ok(calls > 0, 'expired negative capability should trigger a new stock probe');
+	assert.equal(store.value?.stockWeatherAvailable, true);
+	assert.equal(store.value?.weatherSource?.appId, 'com.webos.app.home');
+	assert.equal(store.value?.checkedAt, later);
 });
