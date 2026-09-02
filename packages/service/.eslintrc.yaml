@@ -25,6 +25,5 @@ overrides:
       - './src/remote-default-migration.lib.ts'
       - './src/remote-press-state-machine.ts'
       - './src/remote-process-scanner.ts'
-      - './src/weather.ts'
     rules:
       import/extensions: off

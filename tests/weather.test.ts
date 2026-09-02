@@ -202,7 +202,7 @@ test('stock weather availability is probed once and reused across service restar
 	assert.equal(store.saves, 1, 'loading a valid capability must not rewrite it');
 });
 
-test('fresh stock weather unavailability avoids immediate rescans', async () => {
+test('stock weather unavailability stays persisted for the installed version', async () => {
 	const store = new MemoryCapabilityStore();
 	let initialCalls = 0;
 	const unavailable = async <T extends Record<string, any>>(): Promise<T> => {
@@ -218,52 +218,17 @@ test('fresh stock weather unavailability avoids immediate rescans', async () => 
 	assert.ok(initialCalls > 1);
 
 	let laterCalls = 0;
+	const muchLater = NOW + 30 * 24 * 60 * 60 * 1000;
 	const laterLunaCall = async <T extends Record<string, any>>(uri: string): Promise<T> => {
 		laterCalls++;
 		assert.equal(uri, 'luna://com.webos.service.location/getLocationUpdates');
 		throw new Error('location unavailable');
 	};
-	const second = new WeatherService(laterLunaCall, async () => null, () => NOW, store);
+	const second = new WeatherService(laterLunaCall, async () => null, () => muchLater, store);
 
 	await second.initialize();
-	assert.equal(laterCalls, 0, 'fresh unavailable result must avoid stock capability scanning');
+	assert.equal(laterCalls, 0, 'stored unavailable result must never trigger a timed stock rescan');
 	assert.equal(await second.current(), null);
 	assert.equal(laterCalls, 1, 'normal refresh may still ask the webOS location service once');
-});
-
-test('expired negative stock capability is re-probed and can recover', async () => {
-	const store = new MemoryCapabilityStore();
-	store.value = {
-		schemaVersion: 1,
-		appVersion: 'unknown',
-		checkedAt: NOW,
-		stockWeatherAvailable: false,
-		weatherSource: null,
-		weatherLocation: null,
-	};
-	const later = NOW + 16 * 60 * 1000;
-	let calls = 0;
-	const recoveredLunaCall = async <T extends Record<string, any>>(
-		uri: string,
-		params: Record<string, any> = {},
-	): Promise<T> => {
-		calls++;
-		if (uri.includes('getAllAppPropertiesObj') && params.appId === 'com.webos.app.home') {
-			return {
-				returnValue: true,
-				values: [{
-					Temperature: { Metric: { Value: 25.2 } },
-					WeatherText: 'Sunny',
-				}],
-			} as T;
-		}
-		throw new Error('unavailable');
-	};
-	const service = new WeatherService(recoveredLunaCall, async () => null, () => later, store);
-
-	await service.initialize();
-	assert.ok(calls > 0, 'expired negative capability should trigger a new stock probe');
-	assert.equal(store.value?.stockWeatherAvailable, true);
-	assert.equal(store.value?.weatherSource?.appId, 'com.webos.app.home');
-	assert.equal(store.value?.checkedAt, later);
+	assert.equal(store.saves, 1, 'stored capability remains unchanged until the HomeBack version changes');
 });
