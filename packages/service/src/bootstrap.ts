@@ -2,9 +2,9 @@ import { existsSync, promises as fs } from 'fs';
 
 import { ServiceError, type Service } from './bus';
 import { APP_ID, SERVICE_ID } from './environment';
-import { getUid, readJson, rescanLunaManifests, writeJson } from './utils';
 import { migrateRemoteDefaultsFile } from './remote-default-migration';
 import { REMOTE_CONFIG_PATH, RemoteInputManager } from './remote-input';
+import { getUid, readJson, rescanLunaManifests, writeJson } from './utils';
 
 type ClientPermissions = Record<string, string[]>;
 
@@ -14,6 +14,8 @@ const REQUIRED_APP_PERMISSIONS = [
 	'applications.launch',
 	'applications.internal',
 	'eim.deviceInfo',
+	'location.query',
+	'preferences.applicationpropertyquery',
 	'tv.settings',
 ];
 
