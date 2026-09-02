@@ -8,6 +8,7 @@ import { InternalProvider } from './launcher/providers/internal/internal.provide
 import { SettingsService } from './settings';
 import { SurfaceService } from './surface';
 import { SystemInfoService } from './system-info';
+import { WeatherService } from './weather';
 
 export const systemInfoService = new SystemInfoService();
 export const settingsService = new SettingsService();
@@ -17,6 +18,7 @@ export const surfaceService = new SurfaceService(
 	activationService.initialAction.type === 'none',
 );
 export const keyboardService = new KeyboardService();
+export const weatherService = new WeatherService();
 export const notificationCameraProvider = new NotificationCameraProvider();
 export const cameraService = new CameraService([notificationCameraProvider]);
 
