@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
 	type StockWeatherCapability,
+	WEATHER_CAPABILITY_PATH,
 	type WeatherCapabilityStore,
 	WeatherService,
 } from '../packages/service/src/weather.ts';
@@ -36,48 +37,60 @@ const systemInfoResponse = <T extends Record<string, any>>(overrides: Record<str
 	...overrides,
 }) as T;
 
-test('firmware or model identity change invalidates a stored stock capability', async () => {
-	const store = new MemoryCapabilityStore();
-	store.value = {
-		schemaVersion: 1,
-		appVersion: process.env.APP_VERSION ?? 'unknown',
-		checkedAt: NOW - 10_000,
-		stockWeatherAvailable: false,
-		weatherSource: null,
-		weatherLocation: null,
-		modelName: PLATFORM.modelName,
-		firmwareVersion: '32.99.99',
-		sdkVersion: '24.0.0',
-	} as StockWeatherCapability;
-
-	let systemInfoCalls = 0;
-	let stockProbeCalls = 0;
-	const lunaCall = async <T extends Record<string, any>>(
-		uri: string,
-	): Promise<T> => {
-		if (uri.endsWith('/getSystemInfo')) {
-			systemInfoCalls++;
-			return systemInfoResponse<T>();
-		}
-		if (uri.includes('/appProperties/')) {
-			stockProbeCalls++;
-			return { returnValue: true, values: [] } as T;
-		}
-		throw new Error(`unexpected Luna call: ${uri}`);
-	};
-
-	const service = new WeatherService(lunaCall, async () => null, () => NOW, store);
-	await service.initialize();
-
-	assert.equal(systemInfoCalls, 1, 'startup must read current TV platform identity');
-	assert.ok(stockProbeCalls > 0, 'firmware/sdk mismatch must force a new capability probe');
-	assert.equal(store.saves, 1, 'replacement capability should be persisted after a definitive probe');
-	assert.equal((store.value as any)?.modelName, PLATFORM.modelName);
-	assert.equal((store.value as any)?.firmwareVersion, PLATFORM.firmwareVersion);
-	assert.equal((store.value as any)?.sdkVersion, PLATFORM.sdkVersion);
+const storedNegative = (overrides: Partial<StockWeatherCapability> = {}): StockWeatherCapability => ({
+	schemaVersion: 2,
+	appVersion: process.env.APP_VERSION ?? 'unknown',
+	modelName: PLATFORM.modelName,
+	firmwareVersion: PLATFORM.firmwareVersion,
+	sdkVersion: PLATFORM.sdkVersion,
+	checkedAt: NOW - 10_000,
+	stockWeatherAvailable: false,
+	weatherSource: null,
+	...overrides,
 });
 
-test('transient stock probe failure is inconclusive and is not persisted', async () => {
+test('weather capability machine state is outside the hand-edited config directory', () => {
+	assert.equal(WEATHER_CAPABILITY_PATH, '/var/lib/homeback/weather-capability.json');
+	assert.equal(WEATHER_CAPABILITY_PATH.startsWith('/home/root/.config/homeback/'), false);
+});
+
+test('model, firmware, or SDK identity changes invalidate stored stock capability', async () => {
+	const mismatches: Array<Partial<StockWeatherCapability>> = [
+		{ modelName: 'OLED55C6PSA' },
+		{ firmwareVersion: '34.00.00' },
+		{ sdkVersion: '26.0.0' },
+	];
+
+	for (const mismatch of mismatches) {
+		const store = new MemoryCapabilityStore();
+		store.value = storedNegative(mismatch);
+		let systemInfoCalls = 0;
+		let stockProbeCalls = 0;
+		const lunaCall = async <T extends Record<string, any>>(uri: string): Promise<T> => {
+			if (uri.endsWith('/getSystemInfo')) {
+				systemInfoCalls++;
+				return systemInfoResponse<T>();
+			}
+			if (uri.includes('/appProperties/')) {
+				stockProbeCalls++;
+				return { returnValue: true, values: [] } as T;
+			}
+			throw new Error(`unexpected Luna call: ${uri}`);
+		};
+
+		const service = new WeatherService(lunaCall, async () => null, () => NOW, store);
+		await service.initialize();
+
+		assert.equal(systemInfoCalls, 1, 'startup must read current TV platform identity');
+		assert.ok(stockProbeCalls > 0, 'platform mismatch must force a new capability probe');
+		assert.equal(store.saves, 1, 'replacement capability should be persisted after a definitive probe');
+		assert.equal(store.value?.modelName, PLATFORM.modelName);
+		assert.equal(store.value?.firmwareVersion, PLATFORM.firmwareVersion);
+		assert.equal(store.value?.sdkVersion, PLATFORM.sdkVersion);
+	}
+});
+
+test('transient stock probe failure is inconclusive, is not persisted, and retries next launch', async () => {
 	const store = new MemoryCapabilityStore();
 	let systemInfoCalls = 0;
 	let probeCalls = 0;
@@ -108,7 +121,7 @@ test('transient stock probe failure is inconclusive and is not persisted', async
 	assert.equal(store.saves, 0);
 });
 
-test('definitive stock absence is persisted and does not re-probe on the same platform', async () => {
+test('definitive stock absence is persisted and not re-probed on the same platform tuple', async () => {
 	const store = new MemoryCapabilityStore();
 	let stockProbeCalls = 0;
 	const lunaCall = async <T extends Record<string, any>>(uri: string): Promise<T> => {
@@ -129,13 +142,12 @@ test('definitive stock absence is persisted and does not re-probe on the same pl
 
 	const second = new WeatherService(lunaCall, async () => null, () => NOW + 30 * 24 * 60 * 60 * 1000, store);
 	await second.initialize();
-	assert.equal(stockProbeCalls, callsAfterFirst, 'same model/firmware/sdk/app tuple must reuse a definitive verdict');
+	assert.equal(stockProbeCalls, callsAfterFirst, 'matching model/firmware/sdk/app tuple must reuse a definitive verdict');
 	assert.equal(store.saves, 1);
 });
 
 test('Weather Location is read fresh after capability discovery', async () => {
 	const store = new MemoryCapabilityStore();
-	let phase: 'probe' | 'refresh' = 'probe';
 	const firstLunaCall = async <T extends Record<string, any>>(uri: string): Promise<T> => {
 		if (uri.endsWith('/getSystemInfo')) return systemInfoResponse<T>();
 		if (uri.includes('getAllAppPropertiesObj')) {
@@ -144,18 +156,12 @@ test('Weather Location is read fresh after capability discovery', async () => {
 				values: [{ location: { locationKey: '24741', localizedName: 'Brisbane' } }],
 			} as T;
 		}
-		if (uri.includes('getAppProperty')) {
-			return {
-				returnValue: true,
-				location: { locationKey: '24741', localizedName: 'Brisbane' },
-			} as T;
-		}
-		throw new Error(`unexpected Luna call in ${phase}: ${uri}`);
+		throw new Error(`unexpected initial Luna call: ${uri}`);
 	};
 	const first = new WeatherService(firstLunaCall, async () => null, () => NOW, store);
 	await first.initialize();
+	assert.equal(store.value?.stockWeatherAvailable, false);
 
-	phase = 'refresh';
 	const requested: string[] = [];
 	let locationReads = 0;
 	const secondLunaCall = async <T extends Record<string, any>>(uri: string): Promise<T> => {
@@ -170,7 +176,7 @@ test('Weather Location is read fresh after capability discovery', async () => {
 		if (uri === 'luna://com.webos.service.location/getLocationUpdates') {
 			throw new Error('webOS location fallback should not be needed');
 		}
-		throw new Error(`unexpected Luna call in refresh: ${uri}`);
+		throw new Error(`unexpected refresh Luna call: ${uri}`);
 	};
 	const jsonRequest = async (url: string): Promise<unknown> => {
 		requested.push(url);
@@ -189,7 +195,7 @@ test('Weather Location is read fresh after capability discovery', async () => {
 	assert.equal(weather?.temperatureC, 19.4);
 });
 
-test('stock-unavailable TV produces an Open-Meteo snapshot from webOS location', async () => {
+test('stock-unavailable webOS 6-style TV produces an Open-Meteo snapshot from webOS location', async () => {
 	const store = new MemoryCapabilityStore();
 	const lunaCall = async <T extends Record<string, any>>(uri: string): Promise<T> => {
 		if (uri.endsWith('/getSystemInfo')) return systemInfoResponse<T>({ sdkVersion: '6.0.0' });
