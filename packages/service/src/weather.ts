@@ -8,11 +8,16 @@ const WEATHER_CACHE_MS = 20 * 60 * 1000;
 const WEATHER_STALE_MS = 2 * 60 * 60 * 1000;
 const WEATHER_RETRY_MS = 5 * 60 * 1000;
 const LUNA_PROBE_TIMEOUT_MS = 1_500;
+const PLATFORM_INFO_TIMEOUT_MS = 1_500;
 const LOCATION_TIMEOUT_MS = 6_500;
 const HTTP_TIMEOUT_MS = 5_000;
 const MAX_RESPONSE_BYTES = 256 * 1024;
-const STOCK_CAPABILITY_SCHEMA_VERSION = 1;
-const STOCK_CAPABILITY_PATH = '/home/root/.config/homeback/weather-capability.json';
+const STOCK_CAPABILITY_SCHEMA_VERSION = 2;
+
+export const WEATHER_CAPABILITY_PATH = '/var/lib/homeback/weather-capability.json';
+const LEGACY_WEATHER_CAPABILITY_PATH = '/home/root/.config/homeback/weather-capability.json';
+const TV_SYSTEM_INFO_URI = 'luna://com.webos.service.tv.systemproperty/getSystemInfo';
+const WEBOS_LOCATION_URI = 'luna://com.webos.service.location/getLocationUpdates';
 
 const PREFERENCE_SERVICE_ROOTS = [
 	'luna://com.palm.preferences',
@@ -24,7 +29,12 @@ const STOCK_WEATHER_APP_IDS = [
 	'com.webos.app.igallery',
 	'com.webos.app.weatherlocation',
 ] as const;
-const WEBOS_LOCATION_URI = 'luna://com.webos.service.location/getLocationUpdates';
+const WEATHER_LOCATION_APP_IDS = [
+	'com.webos.app.weatherlocation',
+	'com.webos.app.home',
+	'com.webos.app.lifeonscreen',
+	'com.webos.app.igallery',
+] as const;
 
 type LunaCall = <T extends Record<string, any>>(
 	uri: string,
@@ -45,13 +55,21 @@ type StockWeatherSource = {
 	appId: string;
 };
 
+export type TvPlatformIdentity = {
+	modelName: string;
+	firmwareVersion: string;
+	sdkVersion: string;
+};
+
 export type StockWeatherCapability = {
-	schemaVersion: 1;
+	schemaVersion: 2;
 	appVersion: string;
+	modelName: string;
+	firmwareVersion: string;
+	sdkVersion: string;
 	checkedAt: number;
 	stockWeatherAvailable: boolean;
 	weatherSource: StockWeatherSource | null;
-	weatherLocation: WeatherLocation | null;
 };
 
 export interface WeatherCapabilityStore {
@@ -59,10 +77,36 @@ export interface WeatherCapabilityStore {
 	save(capability: StockWeatherCapability): Promise<void>;
 }
 
+type EffectiveStockCapability = Pick<
+	StockWeatherCapability,
+	'stockWeatherAvailable' | 'weatherSource'
+>;
+
+type StockProbeDecision = EffectiveStockCapability & {
+	definitive: boolean;
+};
+
+type StockProbeCallResult =
+	| { source: StockWeatherSource; kind: 'success'; payload: Record<string, unknown> }
+	| { source: StockWeatherSource; kind: 'definitive-error' | 'root-absent' | 'inconclusive-error' };
+
 class FileWeatherCapabilityStore implements WeatherCapabilityStore {
+	private legacyCleanupAttempted = false;
+
 	public async load(): Promise<unknown> {
+		if (!this.legacyCleanupAttempted) {
+			this.legacyCleanupAttempted = true;
+			try {
+				await fs.unlink(LEGACY_WEATHER_CAPABILITY_PATH);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+					console.warn('[HomeBackWeather] unable to remove legacy capability cache', error);
+				}
+			}
+		}
+
 		try {
-			return JSON.parse(await fs.readFile(STOCK_CAPABILITY_PATH, 'utf8')) as unknown;
+			return JSON.parse(await fs.readFile(WEATHER_CAPABILITY_PATH, 'utf8')) as unknown;
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
 				console.warn('[HomeBackWeather] unable to read stock capability cache', error);
@@ -72,15 +116,15 @@ class FileWeatherCapabilityStore implements WeatherCapabilityStore {
 	}
 
 	public async save(capability: StockWeatherCapability): Promise<void> {
-		const temporary = `${STOCK_CAPABILITY_PATH}.homeback-tmp-${process.pid}-${Date.now()}`;
+		const temporary = `${WEATHER_CAPABILITY_PATH}.homeback-tmp-${process.pid}-${Date.now()}`;
 		try {
-			await fs.mkdir(dirname(STOCK_CAPABILITY_PATH), { recursive: true });
+			await fs.mkdir(dirname(WEATHER_CAPABILITY_PATH), { recursive: true });
 			await fs.writeFile(temporary, `${JSON.stringify(capability, null, '\t')}\n`, {
 				encoding: 'utf8',
 				mode: 0o600,
 			});
 			await fs.chmod(temporary, 0o600);
-			await fs.rename(temporary, STOCK_CAPABILITY_PATH);
+			await fs.rename(temporary, WEATHER_CAPABILITY_PATH);
 		} catch (error) {
 			await fs.unlink(temporary).catch(() => undefined);
 			throw error;
@@ -111,6 +155,18 @@ const finiteNumber = (value: unknown): number | null => {
 		if (Number.isFinite(parsed)) return parsed;
 	}
 	return null;
+};
+
+const normalizedString = (value: unknown): string | null =>
+	typeof value === 'string' && value.trim() ? value.trim() : null;
+
+const platformIdentityFromResponse = (value: unknown): TvPlatformIdentity | null => {
+	if (!isPlainObject(value)) return null;
+	const modelName = normalizedString(value.modelName);
+	const firmwareVersion = normalizedString(value.firmwareVersion);
+	const sdkVersion = normalizedString(value.sdkVersion);
+	if (!modelName || !firmwareVersion || !sdkVersion) return null;
+	return { modelName, firmwareVersion, sdkVersion };
 };
 
 const fahrenheitToCelsius = (value: number): number => (value - 32) * 5 / 9;
@@ -282,14 +338,6 @@ export const extractWeatherLocation = (value: unknown): WeatherLocation | null =
 	return null;
 };
 
-const validWeatherLocation = (value: unknown): WeatherLocation | null => {
-	if (!isPlainObject(value)) return null;
-	const coordinates = latitudeLongitudeFromRecord(value);
-	const name = typeof value.name === 'string' && value.name.trim() ? value.name.trim() : undefined;
-	if (!coordinates && !name) return null;
-	return { ...(coordinates ?? {}), ...(name ? { name } : {}) };
-};
-
 const validStockWeatherSource = (value: unknown): StockWeatherSource | null => {
 	if (!isPlainObject(value)) return null;
 	if (typeof value.root !== 'string' || typeof value.appId !== 'string') return null;
@@ -298,24 +346,36 @@ const validStockWeatherSource = (value: unknown): StockWeatherSource | null => {
 	return root && appId ? { root, appId } : null;
 };
 
-export const parseStockWeatherCapability = (value: unknown): StockWeatherCapability | null => {
+export const parseStockWeatherCapability = (
+	value: unknown,
+	identity?: TvPlatformIdentity,
+): StockWeatherCapability | null => {
 	if (!isPlainObject(value)) return null;
 	if (value.schemaVersion !== STOCK_CAPABILITY_SCHEMA_VERSION) return null;
 	if (value.appVersion !== currentAppVersion()) return null;
+	const modelName = normalizedString(value.modelName);
+	const firmwareVersion = normalizedString(value.firmwareVersion);
+	const sdkVersion = normalizedString(value.sdkVersion);
+	if (!modelName || !firmwareVersion || !sdkVersion) return null;
 	if (typeof value.checkedAt !== 'number' || !Number.isFinite(value.checkedAt)) return null;
 	if (typeof value.stockWeatherAvailable !== 'boolean') return null;
 	const weatherSource = value.weatherSource === null ? null : validStockWeatherSource(value.weatherSource);
 	if (value.weatherSource !== null && !weatherSource) return null;
 	if (value.stockWeatherAvailable !== Boolean(weatherSource)) return null;
-	const weatherLocation = value.weatherLocation === null ? null : validWeatherLocation(value.weatherLocation);
-	if (value.weatherLocation !== null && !weatherLocation) return null;
+	if (identity && (
+		modelName !== identity.modelName ||
+		firmwareVersion !== identity.firmwareVersion ||
+		sdkVersion !== identity.sdkVersion
+	)) return null;
 	return {
-		schemaVersion: 1,
+		schemaVersion: 2,
 		appVersion: value.appVersion,
+		modelName,
+		firmwareVersion,
+		sdkVersion,
 		checkedAt: value.checkedAt,
 		stockWeatherAvailable: value.stockWeatherAvailable,
 		weatherSource,
-		weatherLocation,
 	};
 };
 
@@ -349,7 +409,7 @@ export const requestJson = (url: string, timeoutMs = HTTP_TIMEOUT_MS): Promise<u
 						resolve(JSON.parse(body));
 					} catch (error) {
 						reject(error);
-					}
+				}
 				});
 			},
 		);
@@ -362,8 +422,8 @@ export class WeatherService {
 	private cachedAt = 0;
 	private nextRetryAt = 0;
 	private refreshPromise: Promise<WeatherSnapshot | null> | null = null;
-	private capability: StockWeatherCapability | null = null;
-	private capabilityPromise: Promise<StockWeatherCapability> | null = null;
+	private capability: EffectiveStockCapability | null = null;
+	private capabilityPromise: Promise<EffectiveStockCapability> | null = null;
 
 	public constructor(
 		private readonly lunaCall: LunaCall,
@@ -413,18 +473,27 @@ export class WeatherService {
 
 	private async refresh(): Promise<WeatherSnapshot | null> {
 		const capability = await this.ensureStockCapability();
-		let preferredLocation = capability.weatherLocation;
+		const configuredLocationPromise = this.readCurrentWeatherLocation();
+		let stockWeather: WeatherSnapshot | null = null;
+		let stockPayloadLocation: WeatherLocation | null = null;
+
 		if (capability.weatherSource) {
 			const payload = await this.readAppProperties(
 				capability.weatherSource.root,
 				capability.weatherSource.appId,
 			);
-			const stockWeather = extractStockWeather(payload, this.now());
-			if (stockWeather) return stockWeather;
-			preferredLocation = extractWeatherLocation(payload) ?? preferredLocation;
+			stockWeather = extractStockWeather(payload, this.now());
+			stockPayloadLocation = extractWeatherLocation(payload);
 		}
 
-		const resolvedLocation = await this.resolveStoredWeatherLocation(capability, preferredLocation);
+		const preferredLocation = await configuredLocationPromise ?? stockPayloadLocation;
+		if (stockWeather) {
+			return preferredLocation?.name
+				? { ...stockWeather, location: preferredLocation.name }
+				: stockWeather;
+		}
+
+		const resolvedLocation = await this.resolveWeatherLocation(preferredLocation);
 		if (resolvedLocation?.latitude !== undefined && resolvedLocation.longitude !== undefined) {
 			return this.fetchOpenMeteo(resolvedLocation);
 		}
@@ -434,7 +503,7 @@ export class WeatherService {
 		return null;
 	}
 
-	private async ensureStockCapability(): Promise<StockWeatherCapability> {
+	private async ensureStockCapability(): Promise<EffectiveStockCapability> {
 		if (this.capability) return this.capability;
 		if (this.capabilityPromise) return this.capabilityPromise;
 
@@ -447,60 +516,119 @@ export class WeatherService {
 		}
 	}
 
-	private async loadOrProbeStockCapability(): Promise<StockWeatherCapability> {
-		try {
-			const stored = parseStockWeatherCapability(await this.capabilityStore.load());
-			if (stored) return stored;
-		} catch (error) {
-			console.warn('[HomeBackWeather] stock capability cache load failed', error);
-		}
-
-		const capability = await this.probeStockCapability();
-		await this.persistCapability(capability);
-		console.log(
-			`[HomeBackWeather] stock weather ${capability.stockWeatherAvailable ? 'available' : 'unavailable'}; capability cached for HomeBack ${capability.appVersion}`,
-		);
-		return capability;
-	}
-
-	private async probeStockCapability(): Promise<StockWeatherCapability> {
-		const candidates = PREFERENCE_SERVICE_ROOTS.flatMap(root =>
-			STOCK_WEATHER_APP_IDS.map(appId => ({ root, appId })),
-		);
-		const appPayloads = await Promise.all(candidates.map(async source => ({
-			source,
-			payload: await this.readAppProperties(source.root, source.appId),
-		})));
-
-		let weatherSource: StockWeatherSource | null = null;
-		let weatherLocation: WeatherLocation | null = null;
-		for (const { source, payload } of appPayloads) {
-			if (!payload) continue;
-			if (!weatherSource && extractStockWeather(payload, this.now())) weatherSource = source;
-			weatherLocation ??= extractWeatherLocation(payload);
-		}
-
-		if (!weatherLocation) {
-			const locationPayloads = await Promise.all(candidates.map(async source => ({
-				payload: await this.readLocationProperty(source.root, source.appId),
-			})));
-			for (const { payload } of locationPayloads) {
-				weatherLocation ??= extractWeatherLocation(payload);
+	private async loadOrProbeStockCapability(): Promise<EffectiveStockCapability> {
+		const identity = await this.readPlatformIdentity();
+		if (identity) {
+			try {
+				const stored = parseStockWeatherCapability(await this.capabilityStore.load(), identity);
+				if (stored) {
+					return {
+						stockWeatherAvailable: stored.stockWeatherAvailable,
+						weatherSource: stored.weatherSource,
+					};
+				}
+			} catch (error) {
+				console.warn('[HomeBackWeather] stock capability cache load failed', error);
 			}
 		}
 
-		return {
-			schemaVersion: 1,
+		const decision = await this.probeStockCapability();
+		const effective = {
+			stockWeatherAvailable: decision.stockWeatherAvailable,
+			weatherSource: decision.weatherSource,
+		};
+
+		if (!decision.definitive) {
+			console.warn('[HomeBackWeather] stock weather capability probe inconclusive; not cached');
+			return effective;
+		}
+		if (!identity) {
+			console.warn('[HomeBackWeather] TV platform identity unavailable; stock capability not cached');
+			return effective;
+		}
+
+		const capability: StockWeatherCapability = {
+			schemaVersion: 2,
 			appVersion: currentAppVersion(),
+			...identity,
 			checkedAt: this.now(),
-			stockWeatherAvailable: weatherSource !== null,
-			weatherSource,
-			weatherLocation,
+			stockWeatherAvailable: decision.stockWeatherAvailable,
+			weatherSource: decision.weatherSource,
+		};
+		await this.persistCapability(capability);
+		console.log(
+			`[HomeBackWeather] stock weather ${capability.stockWeatherAvailable ? 'available' : 'unavailable'}; capability cached for ${capability.modelName} firmware ${capability.firmwareVersion} SDK ${capability.sdkVersion} HomeBack ${capability.appVersion}`,
+		);
+		return effective;
+	}
+
+	private async readPlatformIdentity(): Promise<TvPlatformIdentity | null> {
+		try {
+			const response = await this.lunaCall<Record<string, unknown>>(
+				TV_SYSTEM_INFO_URI,
+				{ keys: ['modelName', 'firmwareVersion', 'sdkVersion'] },
+				PLATFORM_INFO_TIMEOUT_MS,
+			);
+			return platformIdentityFromResponse(response);
+		} catch (error) {
+			console.warn('[HomeBackWeather] TV platform identity read failed', error instanceof Error ? error.message : error);
+			return null;
+		}
+	}
+
+	private async probeStockCapability(): Promise<StockProbeDecision> {
+		const candidates: StockWeatherSource[] = PREFERENCE_SERVICE_ROOTS.flatMap(root =>
+			STOCK_WEATHER_APP_IDS.map(appId => ({ root, appId })),
+		);
+		const results = await Promise.all(candidates.map(source => this.probeAppProperties(source)));
+
+		for (const result of results) {
+			if (result.kind !== 'success') continue;
+			if (extractStockWeather(result.payload, this.now())) {
+				return {
+					definitive: true,
+					stockWeatherAvailable: true,
+					weatherSource: result.source,
+				};
+			}
+		}
+
+		const hasConclusiveRoot = results.some(result =>
+			result.kind === 'success' || result.kind === 'definitive-error');
+		const hasTransientFailure = results.some(result => result.kind === 'inconclusive-error');
+		return {
+			definitive: hasConclusiveRoot && !hasTransientFailure,
+			stockWeatherAvailable: false,
+			weatherSource: null,
 		};
 	}
 
+	private async probeAppProperties(source: StockWeatherSource): Promise<StockProbeCallResult> {
+		try {
+			return {
+				source,
+				kind: 'success',
+				payload: await this.lunaCall<Record<string, unknown>>(
+					`${source.root}/appProperties/getAllAppPropertiesObj`,
+					{ appId: source.appId },
+					LUNA_PROBE_TIMEOUT_MS,
+				),
+			};
+		} catch (error) {
+			return { source, kind: this.classifyProbeFailure(error) };
+		}
+	}
+
+	private classifyProbeFailure(error: unknown): Exclude<StockProbeCallResult['kind'], 'success'> {
+		const message = error instanceof Error ? error.message : String(error);
+		if (/service (?:does not exist|not found)|not registered/i.test(message)) return 'root-absent';
+		if (/access.*denied|permission.*denied|not permitted|unknown method|method.*(?:not found|does not exist)|invalid method/i.test(message)) {
+			return 'definitive-error';
+		}
+		return 'inconclusive-error';
+	}
+
 	private async persistCapability(capability: StockWeatherCapability): Promise<void> {
-		this.capability = capability;
 		try {
 			await this.capabilityStore.save(capability);
 		} catch (error) {
@@ -508,21 +636,34 @@ export class WeatherService {
 		}
 	}
 
-	private async resolveStoredWeatherLocation(
-		capability: StockWeatherCapability,
-		location: WeatherLocation | null,
-	): Promise<WeatherLocation | null> {
+	private async readCurrentWeatherLocation(): Promise<WeatherLocation | null> {
+		const candidates = PREFERENCE_SERVICE_ROOTS.flatMap(root =>
+			WEATHER_LOCATION_APP_IDS.map(appId => ({ root, appId })),
+		);
+		const directPayloads = await Promise.all(
+			candidates.map(source => this.readLocationProperty(source.root, source.appId)),
+		);
+		for (const payload of directPayloads) {
+			const location = extractWeatherLocation(payload);
+			if (location) return location;
+		}
+
+		const allPayloads = await Promise.all(
+			candidates.map(source => this.readAppProperties(source.root, source.appId)),
+		);
+		for (const payload of allPayloads) {
+			const location = extractWeatherLocation(payload);
+			if (location) return location;
+		}
+		return null;
+	}
+
+	private async resolveWeatherLocation(location: WeatherLocation | null): Promise<WeatherLocation | null> {
 		if (!location) return null;
 		if (location.latitude !== undefined && location.longitude !== undefined) return location;
 		if (!location.name) return null;
-
 		const resolved = await this.geocode(location.name);
-		if (!resolved) return null;
-		const updatedLocation = { ...resolved, name: location.name };
-		if (capability.weatherLocation?.latitude === undefined || capability.weatherLocation.longitude === undefined) {
-			await this.persistCapability({ ...capability, weatherLocation: updatedLocation });
-		}
-		return updatedLocation;
+		return resolved ? { ...resolved, name: location.name } : null;
 	}
 
 	private async readAppProperties(root: string, appId: string): Promise<Record<string, unknown> | null> {
