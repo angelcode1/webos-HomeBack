@@ -595,7 +595,8 @@ export class WeatherService {
 
 		const hasConclusiveRoot = results.some(result =>
 			result.kind === 'success' || result.kind === 'definitive-error');
-		const hasTransientFailure = results.some(result => result.kind === 'inconclusive-error');
+		const hasTransientFailure = results.some(result =>
+			result.kind === 'inconclusive-error' || result.kind === 'root-absent');
 		return {
 			definitive: hasConclusiveRoot && !hasTransientFailure,
 			stockWeatherAvailable: false,
