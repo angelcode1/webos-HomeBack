@@ -22,7 +22,7 @@
         "rootRequired": true,
         "ipkUrl": "https://github.com/angelcode1/webos-HomeBack/releases/download/v0.6.2/com.homebrew.homeback_0.6.2_all.ipk",
         "ipkHash": {
-          "sha256": "6fb0d54dce680f641418ba411dee75cbecaf9b7e9ed8f47c95a5c9b50707e409"
+          "sha256": "f5242101155736383c30c651aea90fb2df8c551b64dc60290e8bcf2ce996969a"
         }
       }
     }
