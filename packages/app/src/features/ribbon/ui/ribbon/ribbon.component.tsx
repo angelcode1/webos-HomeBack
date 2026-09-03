@@ -4,6 +4,7 @@ import { useRibbonService } from '../../services';
 import { NumericKeyboardProxy } from '../numeric-keyboard-proxy';
 import { RibbonAppDrawer } from '../ribbon-app-drawer';
 import { RibbonCard } from '../ribbon-card';
+import { RibbonClockTile } from '../ribbon-clock-tile';
 
 import s from './ribbon.module.scss';
 
@@ -29,6 +30,7 @@ export const Ribbon = observer((): JSX.Element => {
 					/>
 				))}
 			</div>
+			<RibbonClockTile visible={service.visible} />
 			<NumericKeyboardProxy />
 			<RibbonAppDrawer />
 		</>
