@@ -3,7 +3,7 @@ import { observer } from 'mobx-react-lite';
 
 import type { WeatherCondition } from '@homeback/utils';
 
-import { weatherService } from 'shared/services/services';
+import { WeatherService } from 'shared/services/weather';
 
 import s from './ribbon-status-tile.module.scss';
 
@@ -13,6 +13,7 @@ const TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
 	hour: 'numeric',
 	minute: '2-digit',
 });
+const weatherService = new WeatherService();
 
 const minuteBoundaryDelay = (now: number): number => MINUTE_MS - (now % MINUTE_MS) + 20;
 

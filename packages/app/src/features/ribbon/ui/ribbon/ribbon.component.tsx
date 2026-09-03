@@ -4,7 +4,6 @@ import { useRibbonService } from '../../services';
 import { NumericKeyboardProxy } from '../numeric-keyboard-proxy';
 import { RibbonAppDrawer } from '../ribbon-app-drawer';
 import { RibbonCard } from '../ribbon-card';
-import { RibbonStatusTile } from '../ribbon-status-tile';
 
 import s from './ribbon.module.scss';
 
@@ -30,7 +29,6 @@ export const Ribbon = observer((): JSX.Element => {
 					/>
 				))}
 			</div>
-			<RibbonStatusTile visible={service.visible} />
 			<NumericKeyboardProxy />
 			<RibbonAppDrawer />
 		</>
