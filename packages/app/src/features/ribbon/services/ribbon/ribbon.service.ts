@@ -8,6 +8,7 @@ import { SurfaceService } from 'shared/services/surface';
 
 import { AppDrawerService } from '../app-drawer';
 import { ScrollService } from '../scroll';
+import { LauncherProviderWarningGate } from './launcher-provider-warning.lib';
 import { RemoteHealthService } from './remote-health.service';
 import { RIBBON_AUTO_HIDE_MS } from './ribbon.lib';
 
@@ -20,6 +21,8 @@ export class RibbonService {
 	private ref: HTMLElement | null = null;
 	private index: number | null = null;
 	private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
+	private providerWarningVisible = false;
+	private providerWarningGate: LauncherProviderWarningGate | null = null;
 
 	public constructor(
 		public readonly launcherService: LauncherService,
@@ -32,7 +35,13 @@ export class RibbonService {
 	) {
 		makeAutoObservable<
 			RibbonService,
-			'ref' | 'activationService' | 'surfaceService' | 'autoHideTimer' | 'keyboardService' | 'remoteHealthService'
+			| 'ref'
+			| 'activationService'
+			| 'surfaceService'
+			| 'autoHideTimer'
+			| 'providerWarningGate'
+			| 'keyboardService'
+			| 'remoteHealthService'
 		>(
 			this,
 			{
@@ -40,12 +49,16 @@ export class RibbonService {
 				activationService: false,
 				surfaceService: false,
 				autoHideTimer: false,
+				providerWarningGate: false,
 				keyboardService: false,
 				remoteHealthService: false,
 			},
 			{ autoBind: true },
 		);
 
+		this.providerWarningGate = new LauncherProviderWarningGate(
+			this.setProviderWarningVisible,
+		);
 		this.visible = activationService.initialAction.type === 'showLauncher';
 		this.scrollService.setInteractionHandler(this.noteInteraction);
 		keyboardService.registerOwner('ribbon', {
@@ -89,6 +102,12 @@ export class RibbonService {
 			},
 		);
 
+		reaction(
+			() => this.launcherService.providerErrorCount,
+			errorCount => this.providerWarningGate?.update(errorCount),
+			{ fireImmediately: true },
+		);
+
 		activationService.emitter.on('action', this.handleActivation);
 		surfaceService.emitter.on('requestLauncherHide', this.hide);
 		surfaceService.emitter.on('dismissFeatures', this.hide);
@@ -120,7 +139,7 @@ export class RibbonService {
 
 	public get warningText(): string | null {
 		if (this.remoteHealthService.warning) return this.remoteHealthService.warning;
-		if (this.launcherService.providerErrorCount > 0) {
+		if (this.providerWarningVisible) {
 			return 'Some launcher sources are unavailable. Reopen HomeBack or check system services.';
 		}
 		return null;
@@ -218,6 +237,10 @@ export class RibbonService {
 		this.deleteFocused = false;
 		const max = this.launcherService.visible.length - 1;
 		this.index = max >= 0 ? Math.min(oldIndex, max) : null;
+	}
+
+	private setProviderWarningVisible(visible: boolean): void {
+		this.providerWarningVisible = visible;
 	}
 
 	private handleActivation(action: ActivationAction): void {
