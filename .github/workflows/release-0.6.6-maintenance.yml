@@ -1,0 +1,165 @@
+name: One-time HomeBack 0.6.6 maintenance
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: homeback-0.6.6-maintenance
+  cancel-in-progress: false
+
+jobs:
+  maintain:
+    if: >-
+      github.event.issue.number == 51 &&
+      github.event.sender.login == github.repository_owner &&
+      github.event.comment.author_association == 'OWNER' &&
+      (github.event.comment.body == 'PREPARE HOMEBACK 0.6.6' ||
+       github.event.comment.body == 'PUBLISH HOMEBACK 0.6.6')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Prepare 0.6.6 source branch
+        if: github.event.comment.body == 'PREPARE HOMEBACK 0.6.6'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('README.md')
+          text = path.read_text(encoding='utf-8')
+          marker = '\n## Weather capability reset\n'
+          if marker not in text:
+              raise SystemExit('README cleanup marker not found; refusing an ambiguous rewrite')
+          head, tail = text.split(marker, 1)
+          if 'docs/WEATHER-STATUS-TILE.md' not in tail:
+              raise SystemExit('README tail did not match the obsolete capability section')
+          path.write_text(head.rstrip() + '\n', encoding='utf-8')
+          PY
+
+          node <<'NODE'
+          const fs = require('fs');
+          const version = '0.6.6';
+          const appId = 'com.homebrew.homeback';
+
+          const packagePath = 'package.json';
+          const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+          if (pkg.version !== '0.6.5') {
+            throw new Error(`Expected package version 0.6.5 before preparation, found ${pkg.version}`);
+          }
+          pkg.version = version;
+          fs.writeFileSync(packagePath, `${JSON.stringify(pkg, null, 2)}\n`);
+
+          for (const path of ['repo.json', 'webosbrew/index.json']) {
+            const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+            const entry = data.packages?.find(item => item.id === appId);
+            if (!entry || entry.manifest?.id !== appId) {
+              throw new Error(`HomeBack catalog entry not found in ${path}`);
+            }
+            entry.manifest.version = version;
+            entry.manifest.ipkUrl = `https://github.com/angelcode1/webos-HomeBack/releases/download/v${version}/${appId}_${version}_all.ipk`;
+            fs.writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`);
+          }
+          NODE
+
+          test ! -e packages/service/src/weather.ts
+          test ! -e packages/utils/weather.ts
+          test ! -e packages/app/src/shared/services/weather
+          test ! -e packages/app/src/features/ribbon/ui/ribbon-status-tile
+          ! grep -q '^## Weather capability reset$' README.md
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c release/0.6.6-prep
+          git add README.md package.json repo.json webosbrew/index.json
+          git commit -m 'Prepare HomeBack 0.6.6 clean release'
+
+          if git ls-remote --exit-code --heads origin release/0.6.6-prep >/dev/null 2>&1; then
+            git fetch origin release/0.6.6-prep:refs/remotes/origin/release/0.6.6-prep
+            expected="$(git rev-parse refs/remotes/origin/release/0.6.6-prep)"
+            git push --force-with-lease="release/0.6.6-prep:${expected}" origin HEAD:refs/heads/release/0.6.6-prep
+          else
+            git push origin HEAD:refs/heads/release/0.6.6-prep
+          fi
+
+      - name: Publish 0.6.6 through protected release workflow
+        if: github.event.comment.body == 'PUBLISH HOMEBACK 0.6.6'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="$(node -p "require('./package.json').version")"
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          test "$VERSION" = '0.6.6'
+          test ! -e packages/service/src/weather.ts
+          test ! -e packages/utils/weather.ts
+          test ! -e packages/app/src/shared/services/weather
+          test ! -e packages/app/src/features/ribbon/ui/ribbon-status-tile
+          ! grep -q '^## Weather capability reset$' README.md
+
+          gh workflow run release.yml \
+            --repo "$REPO" \
+            --ref main \
+            -f version=0.6.6 \
+            -f source_ref=main \
+            -f confirmation=PUBLISH \
+            -f allow_existing_release=false
+
+          run_id=''
+          for _ in $(seq 1 60); do
+            run_id="$(gh run list \
+              --repo "$REPO" \
+              --workflow release.yml \
+              --event workflow_dispatch \
+              --limit 20 \
+              --json databaseId,displayTitle,headSha \
+              --jq ".[] | select(.displayTitle == \"Publish v0.6.6 from main\" and .headSha == \"${SOURCE_SHA}\") | .databaseId" \
+              | head -n 1)"
+            if [ -n "$run_id" ]; then
+              break
+            fi
+            sleep 2
+          done
+
+          if [ -z "$run_id" ]; then
+            echo 'Unable to locate the dispatched 0.6.6 release run.'
+            exit 1
+          fi
+
+          gh run watch "$run_id" --repo "$REPO" --exit-status
+          gh release view v0.6.6 --repo "$REPO" >/dev/null
+
+          for tag in v0.6.4 v0.6.5; do
+            if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+              gh release delete "$tag" --repo "$REPO" --cleanup-tag --yes
+            elif git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+              git push origin ":refs/tags/${tag}"
+            fi
+          done
+
+          for tag in v0.6.4 v0.6.5; do
+            if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+              echo "Release ${tag} still exists after cleanup."
+              exit 1
+            fi
+            if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+              echo "Tag ${tag} still exists after cleanup."
+              exit 1
+            fi
+          done
+
+          echo "Published v0.6.6 from ${SOURCE_SHA} and removed v0.6.4/v0.6.5 releases and tags."
