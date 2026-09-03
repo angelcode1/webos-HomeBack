@@ -20,14 +20,13 @@ test('weather hotfix keeps weather out of the web-app startup and launcher rende
 	assert.doesNotMatch(ribbonStyles, /inset:\s*0\s+194px\s+0\s+0/);
 });
 
-test('weather discovery cannot block or fail the privileged bootstrap path', () => {
+test('weather hotfix keeps weather out of the helper startup and LS2 method surface', () => {
+	assert.doesNotMatch(serviceSource, /WeatherService|weatherService/);
+	assert.doesNotMatch(serviceSource, /\/weather\/current/);
+
 	const bootstrapStart = serviceSource.indexOf("service.registerSimple('/bootstrap'");
 	const remoteStart = serviceSource.indexOf("service.registerSimple('/remote/start'");
 	assert.notEqual(bootstrapStart, -1);
 	assert.notEqual(remoteStart, -1);
 	assert.ok(remoteStart > bootstrapStart);
-
-	const bootstrapBlock = serviceSource.slice(bootstrapStart, remoteStart);
-	assert.doesNotMatch(bootstrapBlock, /weatherService/);
-	assert.match(serviceSource, /service\.registerSimple\('\/weather\/current'/);
 });
