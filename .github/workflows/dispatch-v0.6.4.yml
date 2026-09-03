@@ -1,0 +1,26 @@
+name: Dispatch HomeBack v0.6.4
+
+on:
+  push:
+    branches:
+      - ops/dispatch-v0.6.4
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f version=0.6.4 \
+            -f source_ref=main \
+            -f confirmation=PUBLISH \
+            -f allow_existing_release=false
