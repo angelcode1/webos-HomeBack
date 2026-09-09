@@ -62,8 +62,6 @@ test('system-critical source keycodes cannot become service-dependent swallows',
 		}), false);
 	}
 
-	// Explicit native pass-through is always safe, and a direct native replace
-	// does not depend on the HomeBack service/tailer to recreate the key event.
 	assert.equal(validateConfig({ version: 1, keys: { 103: { action: 'pass' } } }), true);
 	assert.equal(validateConfig({
 		version: 1,
@@ -111,7 +109,16 @@ test('top-level native replace retains the wider uinput keycode space', () => {
 
 test('bundled shortcut defaults match the observed physical remote actions', () => {
 	const defaults = JSON.parse(fs.readFileSync(defaultsPath, 'utf8'));
-	assert.equal(defaults.keys['1038'].short.id, 'com.webos.app.hdmi1');
+	assert.deepEqual(defaults.keys['1037'], {
+		label: 'Netflix button',
+		short: { action: 'launch', id: 'youtube.leanback.v4' },
+		long: { action: 'launch', id: 'cdp-30' },
+	});
+	assert.deepEqual(defaults.keys['1038'], {
+		label: 'Prime Video button',
+		short: { action: 'launch', id: 'com.webos.app.hdmi1' },
+		long: { action: 'launch', id: 'com.webos.app.browser' },
+	});
 	assert.equal(defaults.keys['1042'].short.id, 'com.webos.app.hdmi1');
 	assert.deepEqual(defaults.keys['1043'], {
 		label: 'LG Channels button',
@@ -120,7 +127,7 @@ test('bundled shortcut defaults match the observed physical remote actions', () 
 	});
 	assert.deepEqual(defaults.keys['1086'], {
 		label: 'Alexa button',
-		short: { action: 'launch', id: 'cdp-30' },
+		short: { action: 'launch', id: 'org.xbmc.kodi' },
 		long: { action: 'replace', keycode: 400 },
 	});
 	assert.deepEqual(defaults.keys['1111'], {
@@ -204,7 +211,7 @@ test('migration repairs the exact bad 0.4.16 shortcut rotation', () => {
 	});
 	assert.deepEqual(config.keys['1086'], {
 		label: 'Alexa button',
-		short: { action: 'launch', id: 'cdp-30' },
+		short: { action: 'launch', id: 'org.xbmc.kodi' },
 		long: { action: 'replace', keycode: 400 },
 	});
 	assert.deepEqual(config.keys['1111'], {
