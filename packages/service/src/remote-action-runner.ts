@@ -4,6 +4,7 @@ import type { Service } from './bus';
 import { APPLICATION_MANAGER_URI, APP_ID } from './environment';
 import { micomKeycodeForUinput } from './micom-keycodes';
 import type { SemanticAction } from './remote-config';
+import { sendMicomKeycode } from './remote-key-sender';
 
 export type RemoteActionKind = 'short' | 'long';
 
@@ -63,9 +64,7 @@ export class RemoteActionRunner {
 								'timed replace mappings only support keys listed in micom-keycodes.ts.',
 						);
 					}
-					await this.service.oneshot('luna://com.webos.service.micomservice/sendKeycode', {
-						keycode: micom,
-					});
+					await sendMicomKeycode(micom);
 					break;
 				}
 				case 'exec': {
