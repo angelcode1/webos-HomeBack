@@ -59,3 +59,12 @@ jobs:
           IPK="dist/${APP_ID}_${VERSION}_all.ipk"
           echo "Expected IPK: $IPK"
           test -f "$IPK"
+
+      - name: Upload disposable PiP CARD probe
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: homeback-pip-card-probe
+          path: dist/*.ipk
+          if-no-files-found: error
+          retention-days: 7
