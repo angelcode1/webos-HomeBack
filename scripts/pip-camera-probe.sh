@@ -4,6 +4,8 @@ set -eu
 APP_FG_URI='luna://com.webos.service.applicationmanager/getForegroundAppInfo'
 APP_STATUS_URI='luna://com.webos.service.applicationmanager/getAppStatus'
 APP_INFO_URI='luna://com.webos.service.applicationmanager/getAppInfo'
+APP_RUNNING_URI='luna://com.webos.service.applicationmanager/running'
+WAM_RUNNING_URI='luna://com.webos.service.webappmanager/listRunningApps'
 SURFACE_FG_URI='luna://com.webos.surfacemanager/getForegroundAppInfo'
 MV_URI='luna://com.webos.service.multiviewcontroller/launchApps'
 CLOSE_URI='luna://com.webos.service.applicationManager/closeByAppId'
@@ -17,6 +19,20 @@ case "$mode" in
 	known|known-livetv)
 		main_id='com.webos.app.livetv'
 		sub_id='youtube.leanback.v4'
+		;;
+	known-browser)
+		# webOS OSE Surface Manager documentation uses Live TV + Browser as a
+		# Multi View/PiP example. On LG TV firmware this is a useful general-web
+		# CARD control against the HomeBack CARD probe.
+		main_id='com.webos.app.livetv'
+		sub_id='com.webos.app.browser'
+		;;
+	known-amazon)
+		# Community LG-TV reports show the stock Prime Video app (id "amazon")
+		# can be a PiP sub on some models. This mode is optional and harmless if
+		# that app is not installed/eligible on the target TV.
+		main_id='com.webos.app.livetv'
+		sub_id='amazon'
 		;;
 	known-hdmi1)
 		main_id='com.webos.app.hdmi1'
@@ -35,7 +51,7 @@ case "$mode" in
 		sub_id='com.homebrew.homeback'
 		;;
 	*)
-		echo "Usage: $0 [inspect|known|known-livetv|known-hdmi1|homeback|livetv-homeback|hdmi1-homeback|youtube-homeback]" >&2
+		echo "Usage: $0 [inspect|known|known-livetv|known-browser|known-amazon|known-hdmi1|homeback|livetv-homeback|hdmi1-homeback|youtube-homeback]" >&2
 		exit 2
 		;;
 esac
@@ -47,12 +63,23 @@ foreground_info() {
 	luna-send -n 1 -f "$SURFACE_FG_URI" '{"subscribe":false}' || true
 }
 
+surface_info() {
+	luna-send -n 1 -f "$SURFACE_FG_URI" '{"subscribe":false}' || true
+}
+
 app_diagnostics() {
 	app_id=$1
 	echo "[App status: $app_id]"
 	luna-send -n 1 -f "$APP_STATUS_URI" "{\"appId\":\"$app_id\"}" || true
 	echo "[App manifest fields: $app_id]"
-	luna-send -n 1 -f "$APP_INFO_URI" "{\"id\":\"$app_id\",\"properties\":[\"id\",\"type\",\"main\",\"defaultWindowType\",\"visible\",\"handlesRelaunch\",\"supportQuickStart\"]}" || true
+	luna-send -n 1 -f "$APP_INFO_URI" "{\"id\":\"$app_id\",\"properties\":[\"id\",\"type\",\"main\",\"defaultWindowType\",\"visible\",\"handlesRelaunch\",\"supportQuickStart\",\"supportGIP\",\"trustLevel\",\"vendorExtension\"]}" || true
+}
+
+running_diagnostics() {
+	echo '[Application Manager running apps]'
+	luna-send -n 1 -f "$APP_RUNNING_URI" '{"subscribe":false}' || true
+	echo '[Web App Manager running apps]'
+	luna-send -n 1 -f "$WAM_RUNNING_URI" '{"subscribe":false}' || true
 }
 
 echo '=== HomeBack Multi View / PiP hardware probe ==='
@@ -88,6 +115,33 @@ controller is exposed only on the public bus, repeat the same request with
 EOF
 fi
 
+# Poll only Surface Manager at multiple points. A single two-second snapshot can
+# miss a slowly registered or short-lived sub surface; these samples distinguish
+# that case from a sub app which runs in WAM but is never composited as PiP.
+(
+	sleep 1
+	echo
+	echo '--- Surface Manager t+1s ---'
+	surface_info
+	sleep 2
+	echo
+	echo '--- Surface Manager t+3s ---'
+	surface_info
+	sleep 3
+	echo
+	echo '--- Surface Manager t+6s ---'
+	surface_info
+	sleep 4
+	echo
+	echo '--- Surface Manager t+10s ---'
+	surface_info
+	sleep 5
+	echo
+	echo '--- Surface Manager t+15s ---'
+	surface_info
+) &
+poll_pid=$!
+
 sleep 2
 
 echo
@@ -97,6 +151,9 @@ echo
 echo '--- app diagnostics two seconds after request ---'
 app_diagnostics "$main_id"
 app_diagnostics "$sub_id"
+echo
+echo '--- running-process diagnostics two seconds after request ---'
+running_diagnostics
 
 cat <<EOF
 
@@ -110,6 +167,7 @@ Expected successful PiP surface state is conceptually:
   main: primary=true,  pip=false, viewType=mvpip, CARD
   sub:  primary=false, pip=true,  viewType=mvpip, CARD
 
+Surface polling is running at t+1/3/6/10/15 seconds (pid=$poll_pid).
 A safety cleanup will close only the sub app after 20 seconds and then print
 foreground state again. main=$main_id sub=$sub_id
 EOF
