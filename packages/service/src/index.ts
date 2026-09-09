@@ -1,6 +1,6 @@
 import { readLaunchPointIcon, type IconRequest } from './app-catalog';
 import { HomeBackBootstrap } from './bootstrap';
-import { Service } from './bus';
+import { Service, ServiceError } from './bus';
 import { APPLICATION_MANAGER_URI, APP_ID, APP_VERSION, SERVICE_ID } from './environment';
 import { HttpPreviewServer } from './http-server';
 import {
@@ -9,6 +9,7 @@ import {
 	type PreviewNotificationRequest,
 } from './notification';
 import { PreviewNotificationService } from './preview-notification-service';
+import { micomKeycodeForRemoteButton, sendMicomKeycode } from './remote-key-sender';
 import { getUid } from './utils';
 
 const NOTIFICATION_URI = 'luna://com.webos.notification';
@@ -28,6 +29,10 @@ const httpPreviewServer = new HttpPreviewServer({
 
 const bootstrap = new HomeBackBootstrap(service);
 let shuttingDown = false;
+
+type RemoteButtonRequest = {
+	button?: unknown;
+};
 
 const serviceStatus = (): Record<string, unknown> => ({
 	...bootstrap.remoteInput.status(),
@@ -93,6 +98,19 @@ service.registerSimple('/remote/status', () => ({
 	done: true,
 	status: serviceStatus(),
 }));
+
+service.registerSimple<RemoteButtonRequest>('/remote/sendButton', async request => {
+	const micomKeycode = micomKeycodeForRemoteButton(request?.button);
+	if (micomKeycode === null) {
+		throw new ServiceError('Unsupported remote button. Expected digit 0-9 or red/green/yellow/blue.', -400);
+	}
+	if (getUid() !== 0) {
+		throw new ServiceError('HomeBack helper service is not running as root.', -401);
+	}
+
+	await sendMicomKeycode(micomKeycode);
+	return { done: true };
+});
 
 service.registerSimple<PreviewNotificationRequest>('/notification/createPreviewToast', request =>
 	previewNotificationService.createPreviewNotification(request ?? {}),
