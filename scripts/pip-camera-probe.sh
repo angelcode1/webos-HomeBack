@@ -12,26 +12,39 @@ case "$mode" in
 		main_id=''
 		sub_id=''
 		;;
-	known)
-		# LG documents Live TV + YouTube as a supported Multi View/PiP combination
-		# on compatible models. Prove the platform path before involving HomeBack.
+	known|known-livetv)
+		# Live TV is a control pair only, not a HomeBack production dependency.
+		# The lgc5 optimizer keeps com.webos.app.livetv itself available even though
+		# it logically deletes several Live-TV adjuncts and the stock Multi View UI.
 		main_id='com.webos.app.livetv'
 		sub_id='youtube.leanback.v4'
 		;;
-	homeback)
-		# The decisive eligibility test: can the currently installed HomeBack app
-		# become the PiP sub-surface at all?
+	known-hdmi1)
+		# LG also documents HDMI + YouTube as a supported Multi View combination.
+		# This avoids depending on tuner/broadcast setup, but the active HDMI signal
+		# must itself be Multi View compatible (not Dolby Vision / 4K HFR, etc.).
+		main_id='com.webos.app.hdmi1'
+		sub_id='youtube.leanback.v4'
+		;;
+	homeback|livetv-homeback)
+		# Eligibility test using the same Live TV control main surface.
 		main_id='com.webos.app.livetv'
 		sub_id='com.homebrew.homeback'
 		;;
+	hdmi1-homeback)
+		# Production-relevant alternative: preserve HDMI1 as main and ask HomeBack
+		# to become the PiP sub-surface.
+		main_id='com.webos.app.hdmi1'
+		sub_id='com.homebrew.homeback'
+		;;
 	youtube-homeback)
-		# Useful after the known pair passes: keep YouTube as the main app while
+		# Production-relevant alternative: preserve YouTube as the main app while
 		# testing HomeBack as the PiP sub-surface.
 		main_id='youtube.leanback.v4'
 		sub_id='com.homebrew.homeback'
 		;;
 	*)
-		echo "Usage: $0 [inspect|known|homeback|youtube-homeback]" >&2
+		echo "Usage: $0 [inspect|known|known-livetv|known-hdmi1|homeback|livetv-homeback|hdmi1-homeback|youtube-homeback]" >&2
 		exit 2
 		;;
 esac
