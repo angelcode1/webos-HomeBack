@@ -6,7 +6,6 @@ import { luna } from 'shared/services/luna';
 
 import { useRibbonService } from '../../services';
 import {
-	keypadMicomKeycode,
 	moveNumericKeypadSelection,
 	NUMERIC_KEYPAD_COLOURS,
 	NUMERIC_KEYPAD_DIGITS,
@@ -34,17 +33,13 @@ export const NumericKeyboardProxy = observer((): JSX.Element | null => {
 	}, []);
 
 	const sendKey = useCallback((key: NumericKeypadSelection): void => {
-		const keycode = keypadMicomKeycode(key);
 		selectKey(key);
-		if (keycode === null) {
-			console.error(`No MICOM keycode for keypad selection: ${key}`);
-			return;
-		}
 
-		// Keep presses ordered and remote-like so multi-digit channel entry and
-		// colour-key actions behave like physical remote button presses.
+		// MICOM is a private TV service and the web app deliberately does not hold
+		// that ACG. Route keypad presses through HomeBack's elevated helper so the
+		// ribbon and timed remote replacements use one reliable send path.
 		sendQueue.current = sendQueue.current.then(async () => {
-			await luna('luna://com.webos.service.micomservice/sendKeycode', { keycode });
+			await luna(`luna://${process.env.SERVICE_ID}/remote/sendButton`, { button: key });
 			await delay(NUMERIC_REMOTE_KEY_INTERVAL_MS);
 		}).catch(error => {
 			console.error('Unable to send keypad remote key:', error);
