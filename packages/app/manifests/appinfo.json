@@ -3,7 +3,7 @@
 	"version": "@APP_VERSION@",
 	"type": "web",
 	"main": "index.html",
-	"title": "HomeBack",
+	"title": "HomeBack PiP CARD Probe",
 	"icon": "icon80.png",
 	"largeIcon": "icon130.png",
 	"iconColor": "#A50034",
@@ -12,7 +12,7 @@
 	"disableBackHistoryAPI": true,
 	"supportQuickStart": true,
 	"visible": true,
-	"defaultWindowType": "floating",
+	"defaultWindowType": "card",
 	"handlesRelaunch": true,
 	"services": [
 		"@SERVICE_ID@"
