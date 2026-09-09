@@ -52,6 +52,48 @@ Do **not** change those production contracts until the platform capability is pr
 The first phase below therefore performs controller/surface eligibility tests against
 the current app before introducing a dedicated CARD probe.
 
+## Interaction with the lgc5 startup/debloat policy
+
+The target C5 also runs the `angelcode1/lgc5` startup/optimizer deployment. This
+matters to the experiment, but **Live TV itself is not removed**.
+
+The lightweight `scripts/maintenance/startup.sh` hook only reapplies the LG Store
+host policy and starts the delayed SSH-health worker. It does not touch Live TV,
+Surface Manager, or Multi View.
+
+The larger `/var/lib/webosbrew/init.d/zz-optimize` policy is different. Its enabled
+`sysdelete` policy logically hides several optional system apps through
+`deletedSystemAppList`. Relevant entries include:
+
+- `com.webos.app.camera`;
+- Live-TV adjuncts such as `com.webos.app.livehbbtv`, `com.webos.app.livemenu` and
+  `com.webos.app.livetvopapp`;
+- `com.webos.app.multiview-launcher`;
+- `com.webos.app.multiviewsettings`.
+
+It does **not** list the core `com.webos.app.livetv`, and it does not name
+`com.webos.service.multiviewcontroller`. The deletion mechanism is explicitly
+logical: firmware files remain intact.
+
+Therefore:
+
+1. the stock LG Multi View launcher/settings UI may be unavailable on this TV;
+2. the direct `multiviewcontroller/launchApps` experiment is still worth testing;
+3. Live TV remains usable as a known control surface, but it is **not** a production
+   dependency for HomeBack PiP;
+4. the built-in LG Camera app should not be used as a required control because the
+   optimizer intentionally hides it;
+5. production should preserve a compatible current foreground source as `main`
+   rather than switching the user to Live TV.
+
+LG's supported Multi View matrix includes combinations based on Live TV, HDMI and
+YouTube, so the probe also provides HDMI1-based modes. HDMI tests must use a signal
+that is itself Multi View compatible; Dolby Vision / 4K HFR and other documented
+restricted modes can make an otherwise-correct controller call fail.
+
+Do not restore the stock Multi View UI apps just to run this probe. First determine
+whether the controller service remains independently functional on the optimized TV.
+
 ## Phase 0 — inspect current foreground state
 
 On the TV:
@@ -64,7 +106,7 @@ Keep the raw output. This establishes the ordinary single-app foreground shape.
 
 ## Phase 1A — prove Multi View PiP itself with a known pair
 
-Run:
+The default control remains:
 
 ```sh
 sh scripts/pip-camera-probe.sh known
@@ -76,9 +118,27 @@ This asks the private LG Multi View controller for:
 - sub: `youtube.leanback.v4`
 - mode: `pip`
 
-The probe deliberately uses a platform-supported-style combination first. If this
-fails, stop: a HomeBack-specific CARD/whitelist experiment is not yet justified.
-Capture both the `launchApps` response and foreground state.
+`known` is deliberately a **control pair only**. It does not mean HomeBack PiP must
+use Live TV in production.
+
+Because this C5 does not otherwise depend on tuner/broadcast use, an alternative
+control is also available:
+
+```sh
+sh scripts/pip-camera-probe.sh known-hdmi1
+```
+
+which asks for:
+
+- main: `com.webos.app.hdmi1`
+- sub: `youtube.leanback.v4`
+- mode: `pip`
+
+Use ordinary SDR/non-HFR HDMI content for that test.
+
+The probe deliberately uses platform-supported-style combinations first. If both
+known controls fail, stop: a HomeBack-specific CARD/whitelist experiment is not yet
+justified. Capture both the `launchApps` response and foreground state.
 
 If `luna-send` cannot reach the controller at the process/bus level, repeat the same
 request manually with `luna-send-pub`; firmware builds can expose private services
@@ -102,17 +162,28 @@ full-screen operation.
 
 ## Phase 1B — test HomeBack eligibility without changing HomeBack
 
-After Phase 1A passes:
+After Phase 1A passes, there are several main-surface controls available.
+
+Live TV main:
 
 ```sh
 sh scripts/pip-camera-probe.sh homeback
 ```
 
-or, to leave YouTube as the main app:
+YouTube main:
 
 ```sh
 sh scripts/pip-camera-probe.sh youtube-homeback
 ```
+
+HDMI1 main:
+
+```sh
+sh scripts/pip-camera-probe.sh hdmi1-homeback
+```
+
+The YouTube and HDMI modes are closer to the intended production behavior because
+they preserve an already useful foreground source instead of routing through Live TV.
 
 This is intentionally a crude eligibility probe. Current HomeBack is still a
 `floating` launcher app, so one of several outcomes is useful:
@@ -158,12 +229,15 @@ presentation policy. A safe shape is:
 1. HA POST arrives through the existing authenticated endpoint.
 2. Existing state records the newest camera event and signed image URL.
 3. Native compact toast remains the fallback.
-4. If PiP capability/current foreground/source mode permit it, launch or refresh the
+4. Identify the compatible current foreground source/app and preserve it as `main`.
+5. If PiP capability/current foreground/source mode permit it, launch or refresh the
    camera companion as the `sub` surface.
-5. Main app remains `primary` and ordinary remote input remains there.
-6. New events for the same camera replace/refresh the sub image without creating a
+6. Main app remains `primary` and ordinary remote input remains there.
+7. New events for the same camera replace/refresh the sub image without creating a
    queue of PiP sessions.
-7. Hard timeout closes the camera sub surface and restores the single main app.
+8. Hard timeout closes the camera sub surface and restores the single main app.
+
+There is no production step that intentionally launches Live TV first.
 
 Do not put HA credentials or signed URLs in `multiviewcontroller` payloads. Resolve
 camera media inside the HomeBack app/service boundary.
@@ -173,7 +247,9 @@ camera media inside the HomeBack app/service boundary.
 A production PiP implementation is not approved until all of these are measured on
 hardware:
 
-- known LG PiP pair works through the controller;
+- at least one known LG PiP pair works through the controller;
+- controller functionality is confirmed despite the lgc5 logical deletion of the
+  stock Multi View launcher/settings apps;
 - HomeBack/companion is accepted as PiP sub;
 - foreground state proves `mvpip`, main primary, camera sub PiP;
 - main D-pad/OK continues working without manually selecting main after notification;
@@ -184,7 +260,7 @@ hardware:
 - repeated camera events refresh rather than stack sessions;
 - image failure cannot strand PiP;
 - app launch/source change while PiP is open fails closed/cleans up;
-- Live TV, YouTube, HDMI SDR are sampled separately;
+- Live TV, YouTube, HDMI SDR are sampled separately where available;
 - Dolby Vision / 4K HFR / other restricted modes fail gracefully to native toast;
 - Home Assistant signed URL expiry behavior remains bounded and token-free in logs.
 
@@ -196,5 +272,8 @@ hardware:
   and remote behavior are the decisive measurements.
 - The old OVERLAY failure does not prove PiP failure.
 - Conversely, successful PiP does not make a normal web-app overlay passive.
+- A failed stock Multi View UI launch on this optimized C5 does not prove the
+  `multiviewcontroller` service is unavailable, because those UI apps are deliberately
+  hidden by the lgc5 sysdelete policy.
 
 Keep this branch disposable until those distinctions are resolved on the target TV.
