@@ -2,6 +2,8 @@
 set -eu
 
 APP_FG_URI='luna://com.webos.service.applicationmanager/getForegroundAppInfo'
+APP_STATUS_URI='luna://com.webos.service.applicationmanager/getAppStatus'
+APP_INFO_URI='luna://com.webos.service.applicationmanager/getAppInfo'
 SURFACE_FG_URI='luna://com.webos.surfacemanager/getForegroundAppInfo'
 MV_URI='luna://com.webos.service.multiviewcontroller/launchApps'
 CLOSE_URI='luna://com.webos.service.applicationManager/closeByAppId'
@@ -13,33 +15,22 @@ case "$mode" in
 		sub_id=''
 		;;
 	known|known-livetv)
-		# Live TV is a control pair only, not a HomeBack production dependency.
-		# The lgc5 optimizer keeps com.webos.app.livetv itself available even though
-		# it logically deletes several Live-TV adjuncts and the stock Multi View UI.
 		main_id='com.webos.app.livetv'
 		sub_id='youtube.leanback.v4'
 		;;
 	known-hdmi1)
-		# LG also documents HDMI + YouTube as a supported Multi View combination.
-		# This avoids depending on tuner/broadcast setup, but the active HDMI signal
-		# must itself be Multi View compatible (not Dolby Vision / 4K HFR, etc.).
 		main_id='com.webos.app.hdmi1'
 		sub_id='youtube.leanback.v4'
 		;;
 	homeback|livetv-homeback)
-		# Eligibility test using the same Live TV control main surface.
 		main_id='com.webos.app.livetv'
 		sub_id='com.homebrew.homeback'
 		;;
 	hdmi1-homeback)
-		# Production-relevant alternative: preserve HDMI1 as main and ask HomeBack
-		# to become the PiP sub-surface.
 		main_id='com.webos.app.hdmi1'
 		sub_id='com.homebrew.homeback'
 		;;
 	youtube-homeback)
-		# Production-relevant alternative: preserve YouTube as the main app while
-		# testing HomeBack as the PiP sub-surface.
 		main_id='youtube.leanback.v4'
 		sub_id='com.homebrew.homeback'
 		;;
@@ -53,10 +44,15 @@ foreground_info() {
 	echo '[Application Manager + extraInfo]'
 	luna-send -n 1 -f "$APP_FG_URI" '{"subscribe":false,"extraInfo":true}' || true
 	echo '[Surface Manager direct]'
-	# Surface Manager is private on stock webOS. A rooted/private-bus shell may
-	# reach it directly; failure here is diagnostic rather than fatal because
-	# Application Manager extraInfo proxies LSM foreground state as well.
 	luna-send -n 1 -f "$SURFACE_FG_URI" '{"subscribe":false}' || true
+}
+
+app_diagnostics() {
+	app_id=$1
+	echo "[App status: $app_id]"
+	luna-send -n 1 -f "$APP_STATUS_URI" "{\"appId\":\"$app_id\"}" || true
+	echo "[App manifest fields: $app_id]"
+	luna-send -n 1 -f "$APP_INFO_URI" "{\"id\":\"$app_id\",\"properties\":[\"id\",\"type\",\"main\",\"defaultWindowType\",\"visible\",\"handlesRelaunch\",\"supportQuickStart\"]}" || true
 }
 
 echo '=== HomeBack Multi View / PiP hardware probe ==='
@@ -97,6 +93,10 @@ sleep 2
 echo
 echo '--- foreground two seconds after request ---'
 foreground_info
+echo
+echo '--- app diagnostics two seconds after request ---'
+app_diagnostics "$main_id"
+app_diagnostics "$sub_id"
 
 cat <<EOF
 
