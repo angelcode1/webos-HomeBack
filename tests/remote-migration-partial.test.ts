@@ -14,11 +14,14 @@ test('bundled remote defaults match the observed six-button layout', () => {
 		keys: Record<string, {
 			label?: string;
 			short?: { id?: string };
-			long?: { keycode?: number };
+			long?: { id?: string; keycode?: number };
 		}>;
 	};
 
+	assert.equal(config.keys['1037'].short?.id, 'youtube.leanback.v4');
+	assert.equal(config.keys['1037'].long?.id, 'cdp-30');
 	assert.equal(config.keys['1038'].short?.id, 'com.webos.app.hdmi1');
+	assert.equal(config.keys['1038'].long?.id, 'com.webos.app.browser');
 	assert.equal(config.keys['1042'].short?.id, 'com.webos.app.hdmi1');
 	assert.deepEqual(config.keys['1043'], {
 		label: 'LG Channels button',
@@ -27,13 +30,55 @@ test('bundled remote defaults match the observed six-button layout', () => {
 	});
 	assert.deepEqual(config.keys['1086'], {
 		label: 'Alexa button',
-		short: { action: 'launch', id: 'cdp-30' },
+		short: { action: 'launch', id: 'org.xbmc.kodi' },
 		long: { action: 'replace', keycode: 400 },
 	});
 	assert.deepEqual(config.keys['1111'], {
 		label: 'Stan button',
 		short: { action: 'launch', id: 'com.webos.app.hdmi3' },
 		long: { action: 'replace', keycode: 401 },
+	});
+});
+
+test('migration moves the shipped USB-C and Plex shortcuts to Plex, Browser and Kodi', () => {
+	const config = {
+		version: 1 as const,
+		keys: {
+			'1037': {
+				label: 'Netflix button',
+				longPressMs: 800,
+				short: { action: 'launch' as const, id: 'youtube.leanback.v4' },
+				long: { action: 'launch' as const, id: 'com.webos.app.usbc1' },
+			},
+			'1038': {
+				label: 'Prime Video button',
+				short: { action: 'launch' as const, id: 'com.webos.app.hdmi1' },
+				long: { action: 'launch' as const, id: 'com.webos.app.usbc2' },
+			},
+			'1086': {
+				label: 'Alexa button',
+				short: { action: 'launch' as const, id: 'cdp-30' },
+				long: { action: 'replace' as const, keycode: 400 },
+			},
+		},
+	};
+
+	assert.equal(migrateDefaultRemoteShortcuts(config), true);
+	assert.deepEqual(config.keys['1037'], {
+		label: 'Netflix button',
+		longPressMs: 800,
+		short: { action: 'launch', id: 'youtube.leanback.v4' },
+		long: { action: 'launch', id: 'cdp-30' },
+	});
+	assert.deepEqual(config.keys['1038'], {
+		label: 'Prime Video button',
+		short: { action: 'launch', id: 'com.webos.app.hdmi1' },
+		long: { action: 'launch', id: 'com.webos.app.browser' },
+	});
+	assert.deepEqual(config.keys['1086'], {
+		label: 'Alexa button',
+		short: { action: 'launch', id: 'org.xbmc.kodi' },
+		long: { action: 'replace', keycode: 400 },
 	});
 });
 
@@ -75,7 +120,7 @@ test('migration repairs the 0.4.21 default shortcuts to the observed physical la
 	});
 	assert.deepEqual(config.keys['1086'], {
 		label: 'Alexa button',
-		short: { action: 'launch', id: 'cdp-30' },
+		short: { action: 'launch', id: 'org.xbmc.kodi' },
 		long: { action: 'replace', keycode: 400 },
 	});
 	assert.deepEqual(config.keys['1111'], {
@@ -110,7 +155,7 @@ test('migration repairs the known 0.4.16 rotation independently', () => {
 	assert.equal(migrateDefaultRemoteShortcuts(config), true);
 	assert.equal(config.keys['1043'].short.id, 'com.webos.app.hdmi4');
 	assert.equal(config.keys['1043'].long.keycode, 399);
-	assert.equal(config.keys['1086'].short.id, 'cdp-30');
+	assert.equal(config.keys['1086'].short.id, 'org.xbmc.kodi');
 	assert.equal(config.keys['1086'].long.keycode, 400);
 	assert.deepEqual(config.keys['1111'], {
 		label: 'Stan button',
@@ -123,6 +168,11 @@ test('migration preserves genuinely customized shortcuts', () => {
 	const config = {
 		version: 1 as const,
 		keys: {
+			'1037': {
+				label: 'My Netflix shortcut',
+				short: { action: 'launch' as const, id: 'youtube.leanback.v4' },
+				long: { action: 'launch' as const, id: 'com.webos.app.usbc1' },
+			},
 			'1043': {
 				label: 'My HDMI shortcut',
 				short: { action: 'launch' as const, id: 'com.webos.app.hdmi4' },
