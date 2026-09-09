@@ -36,7 +36,7 @@
       },
       "long": {
         "action": "launch",
-        "id": "com.webos.app.usbc1"
+        "id": "cdp-30"
       }
     },
     "1038": {
@@ -47,7 +47,7 @@
       },
       "long": {
         "action": "launch",
-        "id": "com.webos.app.usbc2"
+        "id": "com.webos.app.browser"
       }
     },
     "1042": {
@@ -76,7 +76,7 @@
       "label": "Alexa button",
       "short": {
         "action": "launch",
-        "id": "cdp-30"
+        "id": "org.xbmc.kodi"
       },
       "long": {
         "action": "replace",
