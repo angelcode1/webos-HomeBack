@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-FG_URI='luna://com.webos.service.applicationmanager/getForegroundAppInfo'
+APP_FG_URI='luna://com.webos.service.applicationmanager/getForegroundAppInfo'
+SURFACE_FG_URI='luna://com.webos.surfacemanager/getForegroundAppInfo'
 MV_URI='luna://com.webos.service.multiviewcontroller/launchApps'
 CLOSE_URI='luna://com.webos.service.applicationManager/closeByAppId'
 
@@ -36,7 +37,13 @@ case "$mode" in
 esac
 
 foreground_info() {
-	luna-send -n 1 -f "$FG_URI" '{"subscribe":false,"extraInfo":true}' || true
+	echo '[Application Manager + extraInfo]'
+	luna-send -n 1 -f "$APP_FG_URI" '{"subscribe":false,"extraInfo":true}' || true
+	echo '[Surface Manager direct]'
+	# Surface Manager is private on stock webOS. A rooted/private-bus shell may
+	# reach it directly; failure here is diagnostic rather than fatal because
+	# Application Manager extraInfo proxies LSM foreground state as well.
+	luna-send -n 1 -f "$SURFACE_FG_URI" '{"subscribe":false}' || true
 }
 
 echo '=== HomeBack Multi View / PiP hardware probe ==='
