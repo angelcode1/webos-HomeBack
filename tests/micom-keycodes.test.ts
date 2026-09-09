@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { micomKeycodeForUinput } from '../packages/service/src/micom-keycodes.ts';
 import { isTimedReplaceKeycode } from '../packages/service/src/remote-config.ts';
+import { micomKeycodeForRemoteButton } from '../packages/service/src/remote-key-sender.ts';
 
 test('timed replace translates Linux numeric keycodes to MICOM bytes', () => {
 	assert.equal(micomKeycodeForUinput(11), 0x10); // KEY_0
@@ -16,6 +17,15 @@ test('timed replace translates Linux colour keycodes to MICOM bytes', () => {
 	assert.equal(micomKeycodeForUinput(399), 0x71);
 	assert.equal(micomKeycodeForUinput(400), 0x63);
 	assert.equal(micomKeycodeForUinput(401), 0x61);
+});
+
+test('root helper keypad endpoint accepts only supported digits and colour buttons', () => {
+	assert.equal(micomKeycodeForRemoteButton('0'), 0x10);
+	assert.equal(micomKeycodeForRemoteButton('7'), 0x17);
+	assert.equal(micomKeycodeForRemoteButton('red'), 0x72);
+	assert.equal(micomKeycodeForRemoteButton('blue'), 0x61);
+	assert.equal(micomKeycodeForRemoteButton('POWER'), null);
+	assert.equal(micomKeycodeForRemoteButton(1), null);
 });
 
 test('unknown Linux keycodes are rejected rather than passed through', () => {
