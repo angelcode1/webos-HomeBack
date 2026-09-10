@@ -19,7 +19,7 @@ On the target LG C5 / webOS 10 firmware:
 
 This closed the core feasibility question: a HomeBack web surface can be admitted to native LG PiP without inherently taking control away from the main app.
 
-## Phase 3 companion result
+## Phase 3 companion result — PASS
 
 The production-shaped prototype keeps the normal HomeBack app as `floating` and packages a separate minimal CARD app:
 
@@ -38,49 +38,68 @@ The independently packaged `com.homebrew.homeback.camera` companion is accepted 
 
 This validates the intended two-app production architecture. The production HomeBack app does not need to become a CARD.
 
-### Camera data gate — permission migration pending retest
+### Camera data permission gate — PASS
 
 The first companion run exposed an LS2 permission-upgrade issue, not a compositor issue. After reinstalling the main package, a direct `/bootstrap` call returned `-401` because the helper service was no longer elevated. The companion then repeatedly received `LS_REQUIRES_SECURITY` for `/cameras/list`.
 
-The existing HomeBack UI stored `homeback.setupComplete.v1` and, on subsequent launches, intentionally skipped the privileged bootstrap path. That meant a newly introduced companion client-permission entry could remain unapplied on an existing installation. A reinstall could also leave the service unelevated while the persisted setup marker still said setup was complete.
+The branch added a versioned permission migration (`homeback.permissionSchema.v2`) and `-401` self-healing. On the hardware retest:
 
-The experiment branch now fixes both upgrade cases:
+- Launching normal HomeBack once successfully elevated/reconciled the helper after reinstall.
+- `/bootstrap` then returned `returnValue:true`, `done:true`, and `restartRequired:false`.
+- `com.homebrew.homeback.camera-*` was present in the generated HomeBack client-permission files.
+- The subsequent Live TV + companion run contained no actual `LS_REQUIRES_SECURITY` event for `/cameras/list`.
+- The companion remained a valid PiP sub through the same retention/input test.
 
-- Adds versioned marker `homeback.permissionSchema.v2`.
-- An existing installation with setup complete but no v2 marker performs one idempotent permission reconciliation through the existing Homebrew Channel elevation path.
-- Normal remote-input health recovery also invokes that reconciliation if `/remote/start` returns `-401` after reinstall.
-- The companion runtime identity receives only `public` plus `com.homebrew.homeback.service.group`; it does not inherit HomeBack's launcher/internal/eim/tv privileges.
+The permission boundary is therefore closed. The log did not independently prove that a particular camera image was visibly rendered, so visible media rendering remains part of the end-to-end automatic-event test rather than being inferred from the absence of LS2 errors.
 
-CI #330 is green on the migration-fix head: immutable install, tests, typecheck, lint, dual IPK build, artifact validation, and artifact upload all pass.
+## Phase 4 automatic runtime prototype
+
+The service now contains a guarded automatic camera PiP presenter. It is intentionally conservative for the first end-to-end hardware test:
+
+1. Read Surface Manager's current foreground state; never hard-code or force a source.
+2. Reuse an already-valid HomeBack companion PiP session if one exists.
+3. Otherwise require exactly one normal foreground CARD and allow only mains already measured successfully on this TV: `com.webos.app.livetv` and `youtube.leanback.v4`.
+4. Never replace an unrelated existing Multi View session.
+5. Ask `multiviewcontroller/launchApps` to keep the detected app as `main` and launch `com.homebrew.homeback.camera` as `sub`.
+6. Verify the actual Surface Manager pair before considering PiP successful; `launchApps returnValue:true` alone is insufficient.
+7. On verified PiP, suppress the duplicate native toast and let the companion display the recent camera state.
+8. On unsupported foreground, controller rejection, query failure, or admission timeout, leave the main app alone and use the existing passive native toast fallback.
+9. Close only the companion after the requested camera duration (bounded 1–10 seconds), and reset that timer when a later unsuppressed event reuses the active session.
+
+The automatic presenter exposes diagnostic state at `com.homebrew.homeback.service/pip/status` with the last outcome, reason, detected main app, companion ID, and whether HomeBack considers a PiP session active.
+
+The HTTP camera endpoint has a hard five-second request timeout, so automatic admission is deliberately bounded: foreground Surface Manager calls have a 500 ms timeout, controller launch 750 ms, admission polling uses an immediate sample plus eight 250 ms intervals, and the fallback toast has a one-second LS2 timeout. An admission-query error fails open immediately rather than consuming the entire HTTP request budget.
+
+CI #340 is green on automatic-runtime code head `78c88a240f46c2995d71f57b8fb70fed6393d272`: immutable install, tests, typecheck, lint, both IPK builds, experimental artifact validation, and upload all passed.
 
 ## Production implication
 
 Do **not** convert the production HomeBack application from `floating` to `card`. The production Ribbon/Preview app intentionally uses floating/overlay lifecycle behavior and has different input semantics.
 
-After the camera data permission retest passes, the production service should:
+The next hardware gate is the automatic runtime itself. If that passes, production hardening should add active-session source-change handling and decide whether additional mains are enabled only after they are measured rather than inferred from manifest metadata.
 
-1. Receive/store the HA camera event as it does today.
-2. Inspect the current foreground CARD/source rather than launching Live TV.
-3. Attempt `launchApps` using the existing foreground app as `main` and `com.homebrew.homeback.camera` as `sub` only on compatible sources.
-4. Confirm admission from Surface Manager/controller state rather than trusting `returnValue:true` alone.
-5. Keep `controlMode:none` / `inputMode:none` so the main application retains D-pad/OK.
-6. Close the companion on timeout, source change, replacement by a newer camera event, or failed admission.
-7. Fall back to the existing passive native toast path when PiP is restricted or unavailable.
-
-HDMI restrictions remain a separate issue. A previous HDMI1 control pair was rejected by firmware with `Multiview cannot be launched for restriction`; production must treat that as a normal fallback condition, not as a HomeBack failure.
+HDMI remains intentionally outside the initial automatic allowlist. A previous HDMI1 control pair was rejected by firmware with `Multiview cannot be launched for restriction`; an HDMI camera event should therefore remain on HDMI and use the passive native-toast fallback.
 
 ## Probe script
 
-`scripts/pip-camera-probe.sh` supports the original HomeBack/control modes plus the production-shaped companion modes:
+`scripts/pip-camera-probe.sh` remains available for low-level retention diagnostics and supports the production-shaped companion modes:
 
 - `livetv-companion`
 - `youtube-companion`
 - `hdmi1-companion`
 
-For retention tests it samples Surface Manager and controller status at multiple time points and separates an idle window from a post-input window. The shell safety cleanup closes only the requested sub app after 20 seconds.
+The automatic Phase 4 test should **not** invoke the probe script: the point is to validate that a normal camera notification discovers and preserves the already-foreground app itself.
 
 `known-amazon` remains non-diagnostic on the target TV because app ID `amazon` is not installed.
 
 ## Remaining validation
 
-The remaining Phase 3 gate is narrow: install the migration-fix main package, launch normal HomeBack once so the v2 permission migration/elevation runs, verify the companion can call `/cameras/list`, then trigger a fresh camera event and confirm the companion renders it while PiP is active. A successful Live TV retest is sufficient for the permission boundary because the companion identity and LS2 grant are independent of which app is the PiP main.
+Install the Phase 4 main and companion packages, launch normal HomeBack once after reinstall so its root helper is healthy, then trigger normal camera notifications with Live TV, YouTube, and HDMI1 already foreground.
+
+A pass requires:
+
+- Live TV and YouTube: automatic companion PiP admission, camera content visible, no duplicate native toast, main input retained, and companion-only timeout closure.
+- HDMI1: no source switch and no attempted replacement of the foreground app; passive native toast fallback instead.
+- `/pip/status` and Surface Manager state must agree with the observed behavior.
+
+Only after this gate passes should the automatic presenter be considered for a clean production implementation; this disposable branch and PR remain non-mergeable experiment history.
