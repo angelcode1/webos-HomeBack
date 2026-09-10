@@ -147,14 +147,27 @@ jobs:
           cat "${IPK_PATH}.sha256"
           cat "${CAMERA_IPK_PATH}.sha256"
 
-      - name: Generate Homebrew manifest
+      - name: Generate Homebrew manifests and catalog indexes
         run: |
           IPK_HASH="$(cut -d' ' -f1 "${IPK_PATH}.sha256")"
+          CAMERA_IPK_HASH="$(cut -d' ' -f1 "${CAMERA_IPK_PATH}.sha256")"
           IPK_NAME="$(basename "$IPK_PATH")"
+          CAMERA_IPK_NAME="$(basename "$CAMERA_IPK_PATH")"
           MANIFEST_PATH="com.homebrew.homeback.manifest.json"
-          IPK_HASH="$IPK_HASH" IPK_NAME="$IPK_NAME" MANIFEST_PATH="$MANIFEST_PATH" node scripts/generate-manifest.cjs
+          CAMERA_MANIFEST_PATH="com.homebrew.homeback.camera.manifest.json"
+          IPK_HASH="$IPK_HASH" \
+            CAMERA_IPK_HASH="$CAMERA_IPK_HASH" \
+            IPK_NAME="$IPK_NAME" \
+            CAMERA_IPK_NAME="$CAMERA_IPK_NAME" \
+            CATALOG_VERSION="$VERSION" \
+            RELEASE_TAG="$RELEASE_TAG" \
+            MANIFEST_PATH="$MANIFEST_PATH" \
+            CAMERA_MANIFEST_PATH="$CAMERA_MANIFEST_PATH" \
+            node scripts/generate-manifest.cjs
           cat "$MANIFEST_PATH"
+          cat "$CAMERA_MANIFEST_PATH"
           echo "MANIFEST_PATH=$MANIFEST_PATH" >> "$GITHUB_ENV"
+          echo "CAMERA_MANIFEST_PATH=$CAMERA_MANIFEST_PATH" >> "$GITHUB_ENV"
 
       - name: Create release tag if needed
         if: env.TAG_EXISTS == 'false'
@@ -174,6 +187,7 @@ jobs:
             "$CAMERA_IPK_PATH"
             "${CAMERA_IPK_PATH}.sha256"
             "$MANIFEST_PATH"
+            "$CAMERA_MANIFEST_PATH"
           )
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber
