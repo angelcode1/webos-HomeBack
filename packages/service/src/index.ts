@@ -20,16 +20,18 @@ import { micomKeycodeForRemoteButton, sendMicomKeycode } from './remote-key-send
 import { getUid } from './utils';
 
 const NOTIFICATION_URI = 'luna://com.webos.notification';
+const NOTIFICATION_TIMEOUT_MS = 1_000;
+const DEFAULT_PIP_APP_ID = 'com.homebrew.homeback.camera';
 const service = new Service();
 const previewNotificationState = new PreviewNotificationState();
 const pipCameraPresenter = new PipCameraPresenter({
-	pipAppId: PIP_APP_ID,
+	pipAppId: PIP_APP_ID ?? DEFAULT_PIP_APP_ID,
 	call: (uri, params, timeoutMs) => service.oneshot(uri, params, timeoutMs),
 });
 const previewNotificationService = new PreviewNotificationService(
 	previewNotificationState,
 	SERVICE_ID,
-	toast => service.oneshot(`${NOTIFICATION_URI}/createToast`, toast),
+	toast => service.oneshot(`${NOTIFICATION_URI}/createToast`, toast, NOTIFICATION_TIMEOUT_MS),
 	buildPreviewToastRequest,
 	camera => pipCameraPresenter.present(camera),
 );
