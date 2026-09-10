@@ -1,11 +1,11 @@
+import { APPLICATION_MANAGER_URI } from './environment';
 import type { RecentCameraEntry } from './notification';
 
 const SURFACE_MANAGER_FOREGROUND_URI =
 	'luna://com.webos.surfacemanager/getForegroundAppInfo';
 const MULTIVIEW_LAUNCH_URI =
 	'luna://com.webos.service.multiviewcontroller/launchApps';
-const APPLICATION_CLOSE_URI =
-	'luna://com.webos.service.applicationmanager/closeByAppId';
+const APPLICATION_CLOSE_URI = `${APPLICATION_MANAGER_URI}/closeByAppId`;
 
 const CARD_WINDOW_TYPE = '_WEBOS_WINDOW_TYPE_CARD';
 const MULTIVIEW_VIEW_TYPE = 'mvpip';
@@ -57,7 +57,7 @@ type SurfaceSnapshot = {
 	apps: SurfaceApp[];
 };
 
-const sleep = (milliseconds: number): Promise<void> =>
+const wait = (milliseconds: number): Promise<void> =>
 	new Promise(resolve => setTimeout(resolve, milliseconds));
 
 const optionalString = (value: unknown): string | null =>
@@ -115,8 +115,7 @@ const isCompanionPipSurface = (app: SurfaceApp, pipAppId: string): boolean =>
 	app.primary === false;
 
 const activePipMain = (snapshot: SurfaceSnapshot, pipAppId: string): string | null => {
-	const companion = snapshot.apps.find(app => isCompanionPipSurface(app, pipAppId));
-	if (!companion) return null;
+	if (!snapshot.apps.some(app => isCompanionPipSurface(app, pipAppId))) return null;
 	const main = snapshot.apps.find(
 		app => automaticMainAppIds.has(app.appId) && isMainPipSurface(app, app.appId),
 	);
@@ -124,14 +123,16 @@ const activePipMain = (snapshot: SurfaceSnapshot, pipAppId: string): string | nu
 };
 
 const boundedDuration = (durationMs: number): number =>
-	Number.isFinite(durationMs) ? Math.max(1_000, Math.min(10_000, Math.trunc(durationMs))) : 8_000;
+	Number.isFinite(durationMs)
+		? Math.max(1_000, Math.min(10_000, Math.trunc(durationMs)))
+		: 8_000;
 
 export class PipCameraPresenter {
 	private readonly call: PipCameraLunaCall;
 	private readonly pipAppId: string;
 	private readonly pollIntervalMs: number;
 	private readonly admissionChecks: number;
-	private readonly wait: (milliseconds: number) => Promise<void>;
+	private readonly sleep: (milliseconds: number) => Promise<void>;
 	private inFlight: Promise<boolean> | null = null;
 	private closeTimer: NodeJS.Timeout | null = null;
 	private lastOutcome: PipCameraPresenterStatus['pipLastOutcome'] = 'idle';
@@ -144,7 +145,7 @@ export class PipCameraPresenter {
 		this.pipAppId = options.pipAppId ?? DEFAULT_PIP_APP_ID;
 		this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 		this.admissionChecks = options.admissionChecks ?? DEFAULT_ADMISSION_CHECKS;
-		this.wait = options.sleep ?? sleep;
+		this.sleep = options.sleep ?? wait;
 	}
 
 	public status(): PipCameraPresenterStatus {
@@ -223,7 +224,7 @@ export class PipCameraPresenter {
 		}
 
 		for (let check = 0; check < this.admissionChecks; check += 1) {
-			if (check > 0) await this.wait(this.pollIntervalMs);
+			if (check > 0) await this.sleep(this.pollIntervalMs);
 			try {
 				const current = await this.readSurface();
 				if (this.isAdmitted(current, main.appId)) {
@@ -236,6 +237,7 @@ export class PipCameraPresenter {
 					await this.closeCompanion();
 					return false;
 				}
+			}
 		}
 
 		this.recordFallback('admission-timeout', main.appId);
