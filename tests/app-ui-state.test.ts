@@ -6,7 +6,10 @@ import { wheelShiftFromDelta } from '../packages/app/src/features/ribbon/service
 import { RIBBON_AUTO_HIDE_MS } from '../packages/app/src/features/ribbon/services/ribbon/ribbon.lib.ts';
 import {
 	hasCompletedSetup,
+	hasCurrentPermissionSchema,
+	markCurrentPermissionSchema,
 	markSetupComplete,
+	PERMISSION_SCHEMA_STORAGE_KEY,
 	SETUP_COMPLETE_STORAGE_KEY,
 } from '../packages/app/src/setup-state.ts';
 
@@ -30,6 +33,18 @@ test('setup-complete marker persists successful first setup', () => {
 	assert.equal(hasCompletedSetup(storage), true);
 });
 
+test('permission schema marker remains independent from first-setup state', () => {
+	const storage = new MemoryStorage();
+	markSetupComplete(storage);
+
+	assert.equal(hasCompletedSetup(storage), true);
+	assert.equal(hasCurrentPermissionSchema(storage), false);
+
+	markCurrentPermissionSchema(storage);
+	assert.equal(storage.getItem(PERMISSION_SCHEMA_STORAGE_KEY), '1');
+	assert.equal(hasCurrentPermissionSchema(storage), true);
+});
+
 test('show launch intent is parsed without making malformed params fatal', () => {
 	assert.equal(
 		parseActivateType('{"intent":"homeback:show"}').intent,
@@ -47,7 +62,6 @@ test('drawer wheel delta maps to one deterministic selection shift', () => {
 	assert.equal(wheelShiftFromDelta(120), 1);
 	assert.equal(wheelShiftFromDelta(Number.NaN), 0);
 });
-
 
 test('ribbon inactivity timeout is three seconds', () => {
 	assert.equal(RIBBON_AUTO_HIDE_MS, 3_000);

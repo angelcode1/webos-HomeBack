@@ -80,29 +80,40 @@ export class Service {
 		params: Record<string, any> = {},
 		timeoutMs = DEFAULT_ONESHOT_TIMEOUT_MS,
 	): Promise<T> {
-		const generator = this.subscribe<T>(uri, params);
-		let timeout: NodeJS.Timeout | null = null;
+		return new Promise<T>((resolve, reject) => {
+			const call = this.handle.call(uri, JSON.stringify(params));
+			let settled = false;
+			let timeout: NodeJS.Timeout | null = null;
 
-		try {
-			const result = await Promise.race([
-				generator.next(),
-				new Promise<never>((_resolve, reject) => {
-					timeout = setTimeout(
-						() => reject(new Error(`Luna request timed out after ${timeoutMs}ms: ${uri}`)),
-						timeoutMs,
-					);
-				}),
-			]);
+			const finish = (callback: () => void): void => {
+				if (settled) return;
+				settled = true;
+				if (timeout) clearTimeout(timeout);
+				call.cancel();
+				callback();
+			};
 
-			if (result.done || !result.value) throw new Error(`No response from ${uri}`);
-			if (result.value.returnValue === false) {
-				throw new Error(result.value.errorText ?? `Luna call failed: ${uri}`);
-			}
-			return result.value;
-		} finally {
-			if (timeout) clearTimeout(timeout);
-			await generator.return();
-		}
+			call.addListener('response', pMessage => {
+				let payload: T;
+				try {
+					payload = Message.fromPalmMessage<T>(pMessage).payload;
+				} catch (error) {
+					finish(() => reject(error));
+					return;
+				}
+
+				if (payload.returnValue === false) {
+					finish(() => reject(new Error(payload.errorText ?? `Luna call failed: ${uri}`)));
+					return;
+				}
+				finish(() => resolve(payload));
+			});
+
+			timeout = setTimeout(
+				() => finish(() => reject(new Error(`Luna request timed out after ${timeoutMs}ms: ${uri}`))),
+				timeoutMs,
+			);
+		});
 	}
 
 	private handleRequest(pMessage: palmbus.Message): void {

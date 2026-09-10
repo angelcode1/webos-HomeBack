@@ -5,6 +5,7 @@ export { APPLICATION_MANAGER_URI } from '@homeback/utils';
 export const APP_ID = process.env.APP_ID;
 export const APP_VERSION = process.env.APP_VERSION;
 export const SERVICE_ID = process.env.SERVICE_ID;
+export const PIP_APP_ID = process.env.PIP_APP_ID;
 
 // Webpack emits service.js into the LS2 service root. __dirname therefore
 // remains stable regardless of which cwd SAM/LS2 uses when activating us.

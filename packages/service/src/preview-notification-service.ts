@@ -2,6 +2,7 @@ import type {
 	NotificationToastRequest,
 	PreviewNotificationRequest,
 	PreviewNotificationState,
+	RecentCameraEntry,
 } from './notification';
 
 export type PreviewNotificationResult = {
@@ -15,23 +16,27 @@ export type PreviewToastBuilder = (
 	request: PreviewNotificationRequest,
 	sourceId: string,
 ) => NotificationToastRequest;
+export type PreviewCameraPresenter = (camera: RecentCameraEntry) => Promise<boolean>;
 
 export class PreviewNotificationService {
 	private readonly state: PreviewNotificationState;
 	private readonly sourceId: string;
 	private readonly sendToast: PreviewToastSender;
 	private readonly buildToast: PreviewToastBuilder;
+	private readonly presentCamera: PreviewCameraPresenter | null;
 
 	public constructor(
 		state: PreviewNotificationState,
 		sourceId: string,
 		sendToast: PreviewToastSender,
 		buildToast: PreviewToastBuilder,
+		presentCamera: PreviewCameraPresenter | null = null,
 	) {
 		this.state = state;
 		this.sourceId = sourceId;
 		this.sendToast = sendToast;
 		this.buildToast = buildToast;
+		this.presentCamera = presentCamera;
 	}
 
 	public async createPreviewNotification(
@@ -47,13 +52,27 @@ export class PreviewNotificationService {
 			};
 		}
 
-		try {
-			await this.sendToast(this.buildToast(request, this.sourceId));
-		} catch (error) {
-			if (prepared.reservedAt !== null) {
-				this.state.releaseToastReservation(prepared.key, prepared.reservedAt);
+		let presentedAsPip = false;
+		if (prepared.camera && this.presentCamera) {
+			try {
+				presentedAsPip = await this.presentCamera(prepared.camera);
+			} catch (error) {
+				console.warn(
+					'HomeBack camera PiP presenter failed; falling back to native toast:',
+					error instanceof Error ? error.message : String(error),
+				);
 			}
-			throw error;
+		}
+
+		if (!presentedAsPip) {
+			try {
+				await this.sendToast(this.buildToast(request, this.sourceId));
+			} catch (error) {
+				if (prepared.reservedAt !== null) {
+					this.state.releaseToastReservation(prepared.key, prepared.reservedAt);
+				}
+				throw error;
+			}
 		}
 
 		return {
