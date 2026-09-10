@@ -42,6 +42,7 @@ export type PipCameraPresenterStatus = {
 	pipCompanionAppId: string;
 	pipLastOutcome: 'idle' | 'shown' | 'fallback';
 	pipLastReason: string | null;
+	pipLastError: string | null;
 	pipLastMainAppId: string | null;
 	pipSessionActive: boolean;
 };
@@ -68,6 +69,9 @@ const optionalString = (value: unknown): string | null =>
 
 const optionalBoolean = (value: unknown): boolean | null =>
 	typeof value === 'boolean' ? value : null;
+
+const errorMessage = (error: unknown): string =>
+	error instanceof Error ? error.message : String(error);
 
 const parseSurfaceApp = (value: unknown): SurfaceApp | null => {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -140,6 +144,7 @@ export class PipCameraPresenter {
 	private closeTimer: NodeJS.Timeout | null = null;
 	private lastOutcome: PipCameraPresenterStatus['pipLastOutcome'] = 'idle';
 	private lastReason: string | null = null;
+	private lastError: string | null = null;
 	private lastMainAppId: string | null = null;
 	private sessionActive = false;
 
@@ -156,6 +161,7 @@ export class PipCameraPresenter {
 			pipCompanionAppId: this.pipAppId,
 			pipLastOutcome: this.lastOutcome,
 			pipLastReason: this.lastReason,
+			pipLastError: this.lastError,
 			pipLastMainAppId: this.lastMainAppId,
 			pipSessionActive: this.sessionActive,
 		};
@@ -299,6 +305,7 @@ export class PipCameraPresenter {
 	private recordShown(mainAppId: string, reason: string): void {
 		this.lastOutcome = 'shown';
 		this.lastReason = reason;
+		this.lastError = null;
 		this.lastMainAppId = mainAppId;
 		this.sessionActive = true;
 	}
@@ -306,13 +313,11 @@ export class PipCameraPresenter {
 	private recordFallback(reason: string, mainAppId: string | null, error?: unknown): void {
 		this.lastOutcome = 'fallback';
 		this.lastReason = reason;
+		this.lastError = error === undefined ? null : errorMessage(error);
 		this.lastMainAppId = mainAppId;
 		this.sessionActive = false;
 		if (error) {
-			console.warn(
-				`HomeBack camera PiP fallback (${reason}):`,
-				error instanceof Error ? error.message : String(error),
-			);
+			console.warn(`HomeBack camera PiP fallback (${reason}):`, errorMessage(error));
 		}
 	}
 }
