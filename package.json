@@ -8,7 +8,7 @@
     "build": "webpack --mode production",
     "dev": "webpack serve --mode development",
     "lint": "node scripts/verify-lint-coverage.cjs && yarn workspaces foreach --all --parallel run lint",
-    "typecheck": "tsc -p packages/app/tsconfig.json && tsc -p packages/service/tsconfig.json && tsc -p packages/utils/tsconfig.json",
+    "typecheck": "tsc -p packages/app/tsconfig.json && tsc -p packages/pip-app/tsconfig.json && tsc -p packages/service/tsconfig.json && tsc -p packages/utils/tsconfig.json",
     "check": "yarn test && yarn typecheck && yarn verify:catalog",
     "check:full": "yarn check && yarn lint",
     "test": "node --experimental-transform-types --test tests/*.test.ts",
