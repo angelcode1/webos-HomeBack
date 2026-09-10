@@ -55,20 +55,21 @@ export const App = (): JSX.Element => {
 	useEffect(() => {
 		let disposed = false;
 		const refresh = async (): Promise<void> => {
-			try {
-				const response = await luna<CurrentCameraResponse>(
-					`luna://${process.env.SERVICE_ID}/cameras/current`,
-				);
-				if (disposed) return;
-				const next = response.camera ?? null;
-				setCamera(isFresh(next) ? next : null);
-				setServiceError(null);
-			} catch (error) {
-				if (!disposed) setServiceError(error instanceof Error ? error.message : String(error));
-			}
+			const response = await luna<CurrentCameraResponse>(
+				`luna://${process.env.SERVICE_ID}/cameras/current`,
+			);
+			if (disposed) return;
+			const next = response.camera ?? null;
+			setCamera(isFresh(next) ? next : null);
+			setServiceError(null);
 		};
-		refresh();
-		const timer = window.setInterval(refresh, REFRESH_MS);
+		const runRefresh = (): void => {
+			refresh().catch(error => {
+				if (!disposed) setServiceError(error instanceof Error ? error.message : String(error));
+			});
+		};
+		runRefresh();
+		const timer = window.setInterval(runRefresh, REFRESH_MS);
 		return () => {
 			disposed = true;
 			window.clearInterval(timer);
