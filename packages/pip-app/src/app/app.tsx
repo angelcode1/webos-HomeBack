@@ -35,7 +35,12 @@ const luna = <T extends object>(uri: string, params: Record<string, unknown> = {
 				return;
 			}
 			if (response.returnValue === false) {
-				reject(new Error(response.errorText ?? `LS2 request failed (${response.errorCode ?? 'unknown'})`));
+				reject(
+					new Error(
+						response.errorText ??
+							`LS2 request failed (${response.errorCode ?? 'unknown'})`,
+					),
+				);
 				return;
 			}
 			resolve(response);
@@ -74,8 +79,14 @@ export const App = (): JSX.Element => {
 			}
 		};
 
-		void refresh();
-		const timer = window.setInterval(() => void refresh(), REFRESH_MS);
+		const scheduleRefresh = (): void => {
+			refresh().catch(error => {
+				if (!disposed) setServiceError(error instanceof Error ? error.message : String(error));
+			});
+		};
+
+		scheduleRefresh();
+		const timer = window.setInterval(scheduleRefresh, REFRESH_MS);
 		return () => {
 			disposed = true;
 			window.clearInterval(timer);
