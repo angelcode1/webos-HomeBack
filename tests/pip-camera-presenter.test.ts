@@ -97,6 +97,7 @@ test('eligible current foreground main is launched with companion and must be ad
 		pipCompanionAppId: PIP_APP_ID,
 		pipLastOutcome: 'shown',
 		pipLastReason: 'admitted',
+		pipLastError: null,
 		pipLastMainAppId: mainAppId,
 		pipSessionActive: true,
 	});
@@ -116,6 +117,7 @@ test('already-active valid companion PiP is reused without relaunching the main 
 	assert.equal(await presenter.present(camera()), true);
 	assert.equal(calls.includes(LAUNCH_URI), false);
 	assert.equal(presenter.status().pipLastReason, 'already-active');
+	assert.equal(presenter.status().pipLastError, null);
 	await presenter.stop();
 });
 
@@ -135,6 +137,7 @@ test('unsupported HDMI foreground falls back without asking Multi View to change
 		pipCompanionAppId: PIP_APP_ID,
 		pipLastOutcome: 'fallback',
 		pipLastReason: 'main-not-allowlisted',
+		pipLastError: null,
 		pipLastMainAppId: 'com.webos.app.hdmi1',
 		pipSessionActive: false,
 	});
@@ -161,9 +164,10 @@ test('existing unrelated Multi View state is never replaced by a camera notifica
 	assert.equal(await presenter.present(camera()), false);
 	assert.equal(launchCalls, 0);
 	assert.equal(presenter.status().pipLastReason, 'foreground-not-single');
+	assert.equal(presenter.status().pipLastError, null);
 });
 
-test('controller launch failure returns fallback and best-effort closes only the companion', async () => {
+test('controller launch failure returns fallback, preserves the error, and closes only companion', async () => {
 	const mainAppId = 'com.webos.app.livetv';
 	const calls: Array<{ uri: string; params?: Record<string, unknown> }> = [];
 	const call: PipCameraLunaCall = async (uri, params) => {
@@ -176,6 +180,7 @@ test('controller launch failure returns fallback and best-effort closes only the
 
 	assert.equal(await presenter.present(camera()), false);
 	assert.equal(presenter.status().pipLastReason, 'launch-rejected');
+	assert.equal(presenter.status().pipLastError, 'Multiview cannot be launched for restriction');
 	assert.deepEqual(
 		calls.filter(entry => entry.uri === CLOSE_URI).map(entry => entry.params),
 		[{ id: PIP_APP_ID }],
@@ -199,5 +204,6 @@ test('launch success without verified surface admission times out and closes com
 
 	assert.equal(await presenter.present(camera()), false);
 	assert.equal(presenter.status().pipLastReason, 'admission-timeout');
+	assert.equal(presenter.status().pipLastError, null);
 	assert.equal(closeCalls, 1);
 });
