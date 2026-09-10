@@ -2,8 +2,8 @@ import { reaction } from 'mobx';
 
 import { previewService } from '../features/preview';
 import { ribbonService } from '../features/ribbon/services';
-import { cameraToPreviewPayload } from '../shared/services/camera';
 import { selectKeyboardOwner } from '../shared/services/keyboard';
+import { luna } from '../shared/services/luna';
 import {
 	activationService,
 	cameraService,
@@ -44,8 +44,6 @@ class AppController {
 
 		launcherService.emitter.on('openCameras', this.openCameras);
 		activationService.emitter.on('foreignLaunch', () => {
-			// A focus-owning preview must never cover a newly launched app that the
-			// user can no longer drive. Foreign launch/splash dismisses all features.
 			surfaceService.dismissFeatures();
 		});
 	}
@@ -58,11 +56,17 @@ class AppController {
 			return;
 		}
 
-		const payload = cameraToPreviewPayload(camera);
-		// Keep the shared surface continuously requested during the ribbon ->
-		// preview handoff. Showing first avoids scheduling an unnecessary hide.
-		previewService.show(payload);
-		ribbonService.hide();
+		// Camera PiP is an explicit user action. Fully yield HomeBack's floating
+		// ribbon before asking the root helper to preserve the underlying CARD as
+		// Multi View main and launch the separate camera CARD as PiP sub.
+		await surfaceService.yieldSurfaceAndWait();
+		try {
+			await luna(`luna://${process.env.SERVICE_ID}/cameras/open`, {
+				cameraId: camera.cameraId,
+			});
+		} catch (error) {
+			console.error('[HomeBackCamera] unable to open camera PiP:', error);
+		}
 	};
 }
 

@@ -1,7 +1,7 @@
 import { existsSync, promises as fs } from 'fs';
 
 import { ServiceError, type Service } from './bus';
-import { APP_ID, SERVICE_ID } from './environment';
+import { APP_ID, PIP_APP_ID, SERVICE_ID } from './environment';
 import { getUid, readJson, rescanLunaManifests, writeJson } from './utils';
 import { migrateRemoteDefaultsFile } from './remote-default-migration';
 import { REMOTE_CONFIG_PATH, RemoteInputManager } from './remote-input';
@@ -16,6 +16,8 @@ const REQUIRED_APP_PERMISSIONS = [
 	'eim.deviceInfo',
 	'tv.settings',
 ];
+
+const REQUIRED_PIP_APP_PERMISSIONS = ['public', `${SERVICE_ID}.group`];
 
 const CLIENT_PERMISSION_ROOTS = [
 	'/var/luna-service2-dev/client-permissions.d',
@@ -90,7 +92,8 @@ export class HomeBackBootstrap {
 	}
 
 	private async ensureClientPermissions(): Promise<{ changed: boolean; files: string[] }> {
-		const key = `${APP_ID}-*`;
+		const appKey = `${APP_ID}-*`;
+		const pipAppKey = `${PIP_APP_ID}-*`;
 		let changed = false;
 		const files: string[] = [];
 
@@ -104,14 +107,27 @@ export class HomeBackBootstrap {
 					current = await readJson<ClientPermissions>(path);
 				} catch (error) {
 					if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-						console.warn(`Unable to read existing Luna permissions at ${path}; recreating HomeBack entry:`, error);
+						console.warn(
+							`Unable to read existing Luna permissions at ${path}; recreating HomeBack entry:`,
+							error,
+						);
 					}
 				}
 
-				const desired = [...REQUIRED_APP_PERMISSIONS].sort();
-				const prior = Array.isArray(current[key]) ? [...new Set(current[key])].sort() : [];
-				if (!arraysEqual(prior, desired)) {
-					await writeJson(path, { ...current, [key]: desired });
+				const desiredApp = [...REQUIRED_APP_PERMISSIONS].sort();
+				const desiredPipApp = [...REQUIRED_PIP_APP_PERMISSIONS].sort();
+				const priorApp = Array.isArray(current[appKey])
+					? [...new Set(current[appKey])].sort()
+					: [];
+				const priorPipApp = Array.isArray(current[pipAppKey])
+					? [...new Set(current[pipAppKey])].sort()
+					: [];
+				if (!arraysEqual(priorApp, desiredApp) || !arraysEqual(priorPipApp, desiredPipApp)) {
+					await writeJson(path, {
+						...current,
+						[appKey]: desiredApp,
+						[pipAppKey]: desiredPipApp,
+					});
 					changed = true;
 				}
 				files.push(path);

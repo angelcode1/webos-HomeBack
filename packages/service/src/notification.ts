@@ -25,6 +25,7 @@ export type PreviewNotificationRequest = {
 		title?: string;
 		message?: string;
 		imageUrl?: string;
+		streamUrl?: string;
 		durationMs?: number;
 	};
 };
@@ -41,6 +42,7 @@ export type RecentCameraEntry = {
 	title: string;
 	message: string | null;
 	imageUrl: string;
+	streamUrl: string | null;
 	durationMs: number;
 	receivedAt: number;
 	expiresAt: number;
@@ -100,7 +102,9 @@ export const buildRecentCameraEntry = (
 	receivedAt: number,
 ): RecentCameraEntry | null => {
 	const preview = request.preview ?? {};
-	const imageUrl = boundedOpaqueString(preview.imageUrl, URL_MAX_LENGTH);
+	const streamUrl = boundedOpaqueString(preview.streamUrl, URL_MAX_LENGTH);
+	const suppliedImageUrl = boundedOpaqueString(preview.imageUrl, URL_MAX_LENGTH);
+	const imageUrl = suppliedImageUrl ?? streamUrl;
 	if (!imageUrl) return null;
 
 	const title =
@@ -116,6 +120,7 @@ export const buildRecentCameraEntry = (
 		title,
 		message,
 		imageUrl,
+		streamUrl,
 		durationMs: clampInteger(
 			preview.durationMs,
 			PREVIEW_MIN_DURATION_MS,

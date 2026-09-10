@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   release:
-    name: Build IPK and create release
+    name: Build IPKs and create release
     runs-on: ubuntu-latest
     steps:
       - name: Require explicit publication confirmation
@@ -112,7 +112,7 @@ jobs:
           HOMEBACK_NATIVE_REDISTRIBUTION_CONFIRMED: ${{ vars.HOMEBACK_NATIVE_REDISTRIBUTION_CONFIRMED }}
         run: yarn verify:publication
 
-      - name: Build production IPK
+      - name: Build production IPKs
         run: |
           rm -rf dist
           yarn build
@@ -120,24 +120,32 @@ jobs:
       - name: Show build output
         run: |
           echo "Build output:"
-          find dist -maxdepth 1 -type f -print
-          ls -lh dist
+          find dist -maxdepth 3 -type f -print
+          ls -lh dist dist/pip-camera
 
-      - name: Validate IPK exists
+      - name: Validate IPKs exist
         run: |
           APP_ID="$(node -p "require('./package.json').id")"
           IPK="dist/${APP_ID}_${VERSION}_all.ipk"
-          echo "Expected IPK: $IPK"
+          CAMERA_IPK="dist/pip-camera/${APP_ID}.camera_${VERSION}_all.ipk"
+          echo "Expected HomeBack IPK: $IPK"
+          echo "Expected camera companion IPK: $CAMERA_IPK"
           test -f "$IPK"
+          test -f "$CAMERA_IPK"
           echo "IPK_PATH=$IPK" >> "$GITHUB_ENV"
+          echo "CAMERA_IPK_PATH=$CAMERA_IPK" >> "$GITHUB_ENV"
 
       - name: Fix IPK Installed-Size (packager plugin limitation)
-        run: bash scripts/fix-ipk-installed-size.sh "$IPK_PATH"
+        run: |
+          bash scripts/fix-ipk-installed-size.sh "$IPK_PATH"
+          bash scripts/fix-ipk-installed-size.sh "$CAMERA_IPK_PATH"
 
-      - name: Generate SHA256 checksum
+      - name: Generate SHA256 checksums
         run: |
           sha256sum "$IPK_PATH" > "${IPK_PATH}.sha256"
+          sha256sum "$CAMERA_IPK_PATH" > "${CAMERA_IPK_PATH}.sha256"
           cat "${IPK_PATH}.sha256"
+          cat "${CAMERA_IPK_PATH}.sha256"
 
       - name: Generate Homebrew manifest
         run: |
@@ -160,10 +168,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          ASSETS=(
+            "$IPK_PATH"
+            "${IPK_PATH}.sha256"
+            "$CAMERA_IPK_PATH"
+            "${CAMERA_IPK_PATH}.sha256"
+            "$MANIFEST_PATH"
+          )
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "$IPK_PATH" "${IPK_PATH}.sha256" "$MANIFEST_PATH" --clobber
+            gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber
           else
-            gh release create "$RELEASE_TAG" "$IPK_PATH" "${IPK_PATH}.sha256" "$MANIFEST_PATH" \
+            gh release create "$RELEASE_TAG" "${ASSETS[@]}" \
               --verify-tag \
               --title "HomeBack ${VERSION}" \
               --generate-notes
