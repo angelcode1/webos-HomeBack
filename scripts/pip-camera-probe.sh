@@ -46,11 +46,30 @@ case "$mode" in
 		main_id='youtube.leanback.v4'
 		sub_id='com.homebrew.homeback'
 		;;
+	companion|livetv-companion)
+		main_id='com.webos.app.livetv'
+		sub_id='com.homebrew.homeback.camera'
+		;;
+	hdmi1-companion)
+		main_id='com.webos.app.hdmi1'
+		sub_id='com.homebrew.homeback.camera'
+		;;
+	youtube-companion)
+		main_id='youtube.leanback.v4'
+		sub_id='com.homebrew.homeback.camera'
+		;;
 	*)
-		echo "Usage: $0 [inspect|known|known-livetv|known-browser|known-amazon|known-hdmi1|homeback|livetv-homeback|hdmi1-homeback|youtube-homeback]" >&2
+		echo "Usage: $0 [inspect|known|known-livetv|known-browser|known-amazon|known-hdmi1|homeback|livetv-homeback|hdmi1-homeback|youtube-homeback|companion|livetv-companion|hdmi1-companion|youtube-companion]" >&2
 		exit 2
 		;;
 esac
+
+is_homeback_camera_sub() {
+	case "$sub_id" in
+		com.homebrew.homeback|com.homebrew.homeback.camera) return 0 ;;
+		*) return 1 ;;
+	esac
+}
 
 foreground_info() {
 	echo '[Application Manager + extraInfo]'
@@ -145,7 +164,7 @@ controller is exposed only on the public bus, repeat the same request with
 EOF
 fi
 
-if [ "$sub_id" = 'com.homebrew.homeback' ]; then
+if is_homeback_camera_sub; then
 	cat <<'EOF'
 
 *** CONTROLLED INPUT TEST ***
@@ -182,7 +201,7 @@ fi
 	echo
 	echo '--- Surface Manager t+12s (pre-input) ---'
 	surface_info
-	if [ "$sub_id" = 'com.homebrew.homeback' ]; then
+	if is_homeback_camera_sub; then
 		echo
 		echo '>>> NOW TEST D-PAD + OK <<<'
 		echo 'Do not deliberately select the PiP; operate the MAIN app only.'
@@ -212,7 +231,7 @@ echo
 echo '--- running-process diagnostics two seconds after request ---'
 running_diagnostics
 
-if [ "$sub_id" = 'com.homebrew.homeback' ]; then
+if is_homeback_camera_sub; then
 	cat <<EOF
 
 Keep the remote untouched until the t+12 marker. Then test D-pad + OK on the
