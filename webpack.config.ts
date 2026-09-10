@@ -1,10 +1,10 @@
 import { hoc } from '@webosbrew/webos-packager-plugin';
 
 import app from '@homeback/app/webpack.config';
-import pipApp from '@homeback/pip-app/webpack.config';
 import service from '@homeback/service/webpack.config';
 
 import { PIP_APP_ID } from './build/project';
+import pipApp from './packages/pip-app/webpack.config';
 import { id, version } from './package.json';
 
 const homeBackPackage = hoc({
