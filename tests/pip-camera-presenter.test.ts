@@ -11,7 +11,7 @@ import {
 const PIP_APP_ID = 'com.homebrew.homeback.camera';
 const SURFACE_URI = 'luna://com.webos.surfacemanager/getForegroundAppInfo';
 const LAUNCH_URI = 'luna://com.webos.service.multiviewcontroller/launchApps';
-const CLOSE_URI = 'luna://com.webos.service.applicationmanager/closeByAppId';
+const CLOSE_URI = 'luna://com.webos.service.applicationManager/closeByAppId';
 
 const camera = (durationMs = 8_000): RecentCameraEntry => ({
 	cameraId: 'camera.front_door',
