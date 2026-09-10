@@ -7,8 +7,10 @@ APP_INFO_URI='luna://com.webos.service.applicationmanager/getAppInfo'
 APP_RUNNING_URI='luna://com.webos.service.applicationmanager/running'
 WAM_RUNNING_URI='luna://com.webos.service.webappmanager/listRunningApps'
 SURFACE_FG_URI='luna://com.webos.surfacemanager/getForegroundAppInfo'
-MV_URI='luna://com.webos.service.multiviewcontroller/launchApps'
+MV_BASE='luna://com.webos.service.multiviewcontroller'
+MV_URI="$MV_BASE/launchApps"
 CLOSE_URI='luna://com.webos.service.applicationManager/closeByAppId'
+LOG_FILE='/var/log/messages'
 
 mode="${1:-known}"
 case "$mode" in
@@ -21,16 +23,10 @@ case "$mode" in
 		sub_id='youtube.leanback.v4'
 		;;
 	known-browser)
-		# webOS OSE Surface Manager documentation uses Live TV + Browser as a
-		# Multi View/PiP example. On LG TV firmware this is a useful general-web
-		# CARD control against the HomeBack CARD probe.
 		main_id='com.webos.app.livetv'
 		sub_id='com.webos.app.browser'
 		;;
 	known-amazon)
-		# Community LG-TV reports show the stock Prime Video app (id "amazon")
-		# can be a PiP sub on some models. This mode is optional and harmless if
-		# that app is not installed/eligible on the target TV.
 		main_id='com.webos.app.livetv'
 		sub_id='amazon'
 		;;
@@ -67,6 +63,13 @@ surface_info() {
 	luna-send -n 1 -f "$SURFACE_FG_URI" '{"subscribe":false}' || true
 }
 
+controller_snapshot() {
+	for method in getStatus getMultiviewStatus getRestrictionStatus getConfigInfo; do
+		echo "[Multi View controller: $method]"
+		luna-send -n 1 -f "$MV_BASE/$method" '{}' || true
+	done
+}
+
 app_diagnostics() {
 	app_id=$1
 	echo "[App status: $app_id]"
@@ -80,6 +83,33 @@ running_diagnostics() {
 	luna-send -n 1 -f "$APP_RUNNING_URI" '{"subscribe":false}' || true
 	echo '[Web App Manager running apps]'
 	luna-send -n 1 -f "$WAM_RUNNING_URI" '{"subscribe":false}' || true
+}
+
+log_start_lines=0
+if [ -r "$LOG_FILE" ]; then
+	log_start_lines=$(wc -l < "$LOG_FILE" 2>/dev/null | tr -d ' ' || echo 0)
+fi
+
+transition_logs() {
+	if [ ! -r "$LOG_FILE" ]; then
+		echo '[transition log unavailable]'
+		return
+	fi
+	log_end_lines=$(wc -l < "$LOG_FILE" 2>/dev/null | tr -d ' ' || echo 0)
+	case "$log_start_lines:$log_end_lines" in
+		*[!0-9:]*|'')
+			echo '[transition log line count unavailable]'
+			return
+			;;
+	esac
+	log_delta=$((log_end_lines - log_start_lines))
+	if [ "$log_delta" -le 0 ]; then
+		echo '[no new transition log lines]'
+		return
+	fi
+	tail -n "$log_delta" "$LOG_FILE" 2>/dev/null \
+		| grep -E 'HomeBackPiPProbe|com\.homebrew\.homeback|multiviewcontroller|surface-manager|WebAppMgr|SAM .*APP_(LAUNCH|CLOSE)|SAM .*LIFE_STATUS|SAM .*RUNTIME_STATUS' \
+		|| true
 }
 
 echo '=== HomeBack Multi View / PiP hardware probe ==='
@@ -115,9 +145,18 @@ controller is exposed only on the public bus, repeat the same request with
 EOF
 fi
 
-# Poll only Surface Manager at multiple points. A single two-second snapshot can
-# miss a slowly registered or short-lived sub surface; these samples distinguish
-# that case from a sub app which runs in WAM but is never composited as PiP.
+if [ "$sub_id" = 'com.homebrew.homeback' ]; then
+	cat <<'EOF'
+
+*** CONTROLLED INPUT TEST ***
+DO NOT TOUCH THE REMOTE until this script prints:
+    >>> NOW TEST D-PAD + OK <<<
+The t+1/3/6/10/12 samples are therefore an IDLE retention test. Only after the
+marker should you press D-pad and OK, without deliberately selecting the PiP.
+The t+15 sample shows whether input caused a control/focus transition.
+EOF
+fi
+
 (
 	sleep 1
 	echo
@@ -127,18 +166,36 @@ fi
 	echo
 	echo '--- Surface Manager t+3s ---'
 	surface_info
+	echo '--- Controller snapshot t+3s ---'
+	controller_snapshot
 	sleep 3
 	echo
 	echo '--- Surface Manager t+6s ---'
 	surface_info
+	echo '--- Controller snapshot t+6s ---'
+	controller_snapshot
 	sleep 4
 	echo
 	echo '--- Surface Manager t+10s ---'
 	surface_info
-	sleep 5
+	sleep 2
 	echo
-	echo '--- Surface Manager t+15s ---'
+	echo '--- Surface Manager t+12s (pre-input) ---'
 	surface_info
+	if [ "$sub_id" = 'com.homebrew.homeback' ]; then
+		echo
+		echo '>>> NOW TEST D-PAD + OK <<<'
+		echo 'Do not deliberately select the PiP; operate the MAIN app only.'
+	fi
+	sleep 3
+	echo
+	echo '--- Surface Manager t+15s (post-input window) ---'
+	surface_info
+	echo '--- Controller snapshot t+15s ---'
+	controller_snapshot
+	echo
+	echo '--- transition logs through t+15s ---'
+	transition_logs
 ) &
 poll_pid=$!
 
@@ -155,21 +212,30 @@ echo
 echo '--- running-process diagnostics two seconds after request ---'
 running_diagnostics
 
-cat <<EOF
+if [ "$sub_id" = 'com.homebrew.homeback' ]; then
+	cat <<EOF
 
-For the next 20 seconds, test the remote without selecting the PiP window:
-  1. D-pad the MAIN app.
-  2. Press OK in the MAIN app.
-  3. Note whether HomeBack receives/steals those actions.
-  4. If LG exposes its Multi View controls, note which surface is marked active.
+Keep the remote untouched until the t+12 marker. Then test D-pad + OK on the
+MAIN app only. Expected retained PiP before and after input:
+  main: primary=true,  pip=false, viewType=mvpip, CARD
+  sub:  primary=false, pip=true,  viewType=mvpip, CARD
+
+Polling: t+1/3/6/10/12/15 seconds (pid=$poll_pid).
+EOF
+else
+	cat <<EOF
 
 Expected successful PiP surface state is conceptually:
   main: primary=true,  pip=false, viewType=mvpip, CARD
   sub:  primary=false, pip=true,  viewType=mvpip, CARD
 
-Surface polling is running at t+1/3/6/10/15 seconds (pid=$poll_pid).
-A safety cleanup will close only the sub app after 20 seconds and then print
-foreground state again. main=$main_id sub=$sub_id
+Polling: t+1/3/6/10/12/15 seconds (pid=$poll_pid).
+EOF
+fi
+
+cat <<EOF
+A safety cleanup will close only the requested sub app after 20 seconds and
+then print foreground state again. main=$main_id sub=$sub_id
 EOF
 
 (
