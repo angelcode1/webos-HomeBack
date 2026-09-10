@@ -67,8 +67,8 @@ export const App = (): JSX.Element => {
 				if (!disposed) setServiceError(error instanceof Error ? error.message : String(error));
 			}
 		};
-		void refresh();
-		const timer = window.setInterval(() => void refresh(), REFRESH_MS);
+		refresh();
+		const timer = window.setInterval(refresh, REFRESH_MS);
 		return () => {
 			disposed = true;
 			window.clearInterval(timer);
