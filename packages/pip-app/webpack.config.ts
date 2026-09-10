@@ -6,11 +6,7 @@ import CopyPlugin from 'copy-webpack-plugin';
 import HtmlWebpackPlugin from 'html-webpack-plugin';
 
 import { createManifestTransformer } from '../../build/manifest-transform';
-import {
-	APP_VERSION,
-	PIP_APP_ID,
-	SERVICE_ID,
-} from '../../build/project';
+import { APP_VERSION, PIP_APP_ID, SERVICE_ID } from '../../build/project';
 
 const transformManifest = createManifestTransformer({
 	APP_ID: PIP_APP_ID,
