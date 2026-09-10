@@ -1,9 +1,9 @@
 {
   "paging": {
     "page": 1,
-    "count": 1,
+    "count": 2,
     "maxPage": 1,
-    "itemsTotal": 1
+    "itemsTotal": 2
   },
   "packages": [
     {
@@ -13,16 +13,36 @@
       "shortDescription": "A fast replacement Home launcher and remote-button remapper for rooted LG webOS TVs.",
       "manifest": {
         "id": "com.homebrew.homeback",
-        "version": "0.6.7",
+        "version": "0.6.8",
         "type": "web",
         "title": "HomeBack",
         "appDescription": "A fast replacement Home launcher and remote-button remapper for rooted LG webOS TVs.",
         "iconUri": "https://raw.githubusercontent.com/angelcode1/webos-HomeBack/main/packages/app/manifests/icon130.png",
         "sourceUrl": "https://github.com/angelcode1/webos-HomeBack",
         "rootRequired": true,
-        "ipkUrl": "https://github.com/angelcode1/webos-HomeBack/releases/download/v0.6.7/com.homebrew.homeback_0.6.7_all.ipk",
+        "ipkUrl": "https://github.com/angelcode1/webos-HomeBack/releases/download/v0.6.8/com.homebrew.homeback_0.6.8_all.ipk",
         "ipkHash": {
-          "sha256": "c425d74b5a0763a77ea79ff7df4b6fd1d0781b893e7944c54deae787cc8360b7"
+          "sha256": "efa4b295af49701c1405790ee4cbc5e797b51d26207c69fc9937d88a4cb9f8fd"
+        }
+      }
+    },
+    {
+      "id": "com.homebrew.homeback.camera",
+      "title": "HomeBack Camera",
+      "iconUri": "https://raw.githubusercontent.com/angelcode1/webos-HomeBack/main/packages/pip-app/manifests/icon130.png",
+      "shortDescription": "Camera PiP companion for HomeBack Home Assistant notifications.",
+      "manifest": {
+        "id": "com.homebrew.homeback.camera",
+        "version": "0.6.8",
+        "type": "web",
+        "title": "HomeBack Camera",
+        "appDescription": "Camera PiP companion for HomeBack Home Assistant notifications.",
+        "iconUri": "https://raw.githubusercontent.com/angelcode1/webos-HomeBack/main/packages/pip-app/manifests/icon130.png",
+        "sourceUrl": "https://github.com/angelcode1/webos-HomeBack",
+        "rootRequired": true,
+        "ipkUrl": "https://github.com/angelcode1/webos-HomeBack/releases/download/v0.6.8/com.homebrew.homeback.camera_0.6.8_all.ipk",
+        "ipkHash": {
+          "sha256": "5024a810eeae8730defdfdf20a18fdf3da2b86f97c7f42b6ba11e3084ec7090b"
         }
       }
     }
