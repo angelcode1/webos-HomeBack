@@ -47,24 +47,29 @@ jobs:
       - name: Verify source
         run: yarn check:full
 
-      - name: Build production IPK
+      - name: Build production IPKs
         run: |
           rm -rf dist
           yarn build
 
-      - name: Validate IPK exists
+      - name: Validate experimental IPKs exist
         run: |
           VERSION="$(node -p "require('./package.json').version")"
           APP_ID="$(node -p "require('./package.json').id")"
-          IPK="dist/${APP_ID}_${VERSION}_all.ipk"
-          echo "Expected IPK: $IPK"
-          test -f "$IPK"
+          MAIN_IPK="dist/${APP_ID}_${VERSION}_all.ipk"
+          PIP_IPK="dist/pip-camera/${APP_ID}.camera_${VERSION}_all.ipk"
+          echo "Expected HomeBack IPK: $MAIN_IPK"
+          echo "Expected camera PiP IPK: $PIP_IPK"
+          test -f "$MAIN_IPK"
+          test -f "$PIP_IPK"
 
-      - name: Upload disposable PiP CARD probe
+      - name: Upload disposable PiP companion probe
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: homeback-pip-card-probe
-          path: dist/*.ipk
+          name: homeback-pip-companion-probe
+          path: |
+            dist/*.ipk
+            dist/pip-camera/*.ipk
           if-no-files-found: error
           retention-days: 7
