@@ -1,13 +1,20 @@
 import { readLaunchPointIcon, type IconRequest } from './app-catalog';
 import { HomeBackBootstrap } from './bootstrap';
 import { Service, ServiceError } from './bus';
-import { APPLICATION_MANAGER_URI, APP_ID, APP_VERSION, SERVICE_ID } from './environment';
+import {
+	APPLICATION_MANAGER_URI,
+	APP_ID,
+	APP_VERSION,
+	PIP_APP_ID,
+	SERVICE_ID,
+} from './environment';
 import { HttpPreviewServer } from './http-server';
 import {
 	buildPreviewToastRequest,
 	PreviewNotificationState,
 	type PreviewNotificationRequest,
 } from './notification';
+import { PipCameraPresenter } from './pip-camera-presenter';
 import { PreviewNotificationService } from './preview-notification-service';
 import { micomKeycodeForRemoteButton, sendMicomKeycode } from './remote-key-sender';
 import { getUid } from './utils';
@@ -15,11 +22,16 @@ import { getUid } from './utils';
 const NOTIFICATION_URI = 'luna://com.webos.notification';
 const service = new Service();
 const previewNotificationState = new PreviewNotificationState();
+const pipCameraPresenter = new PipCameraPresenter({
+	pipAppId: PIP_APP_ID,
+	call: (uri, params, timeoutMs) => service.oneshot(uri, params, timeoutMs),
+});
 const previewNotificationService = new PreviewNotificationService(
 	previewNotificationState,
 	SERVICE_ID,
 	toast => service.oneshot(`${NOTIFICATION_URI}/createToast`, toast),
 	buildPreviewToastRequest,
+	camera => pipCameraPresenter.present(camera),
 );
 const httpPreviewServer = new HttpPreviewServer({
 	version: APP_VERSION ?? 'unknown',
@@ -37,6 +49,7 @@ type RemoteButtonRequest = {
 const serviceStatus = (): Record<string, unknown> => ({
 	...bootstrap.remoteInput.status(),
 	...httpPreviewServer.status(),
+	...pipCameraPresenter.status(),
 });
 
 const shutdownService = (exitCode = 0): void => {
@@ -51,7 +64,10 @@ const shutdownService = (exitCode = 0): void => {
 			error instanceof Error ? error.name : 'UnknownError',
 		);
 	});
-	void Promise.all([stopRemoteInput, stopHttp]).finally(() => process.exit(exitCode));
+	const stopPip = pipCameraPresenter.stop().catch(error => {
+		console.error('Unable to cleanly stop HomeBack camera PiP:', error);
+	});
+	void Promise.all([stopRemoteInput, stopHttp, stopPip]).finally(() => process.exit(exitCode));
 };
 
 // `exit` is synchronous-only. Keep this as a last fail-open fallback if normal
@@ -97,6 +113,11 @@ service.registerSimple('/remote/start', async () => {
 service.registerSimple('/remote/status', () => ({
 	done: true,
 	status: serviceStatus(),
+}));
+
+service.registerSimple('/pip/status', () => ({
+	done: true,
+	status: pipCameraPresenter.status(),
 }));
 
 service.registerSimple<RemoteButtonRequest>('/remote/sendButton', async request => {
