@@ -7,7 +7,7 @@
   "scripts": {
     "build": "webpack --mode production",
     "dev": "webpack serve --mode development",
-    "lint": "node scripts/verify-lint-coverage.cjs && yarn workspaces foreach --all --parallel run lint",
+    "lint": "node scripts/verify-lint-coverage.cjs && yarn workspaces foreach --all --parallel run lint && eslint --ext .ts,.tsx,.js packages/pip-app",
     "typecheck": "tsc -p packages/app/tsconfig.json && tsc -p packages/pip-app/tsconfig.json && tsc -p packages/service/tsconfig.json && tsc -p packages/utils/tsconfig.json",
     "check": "yarn test && yarn typecheck && yarn verify:catalog",
     "check:full": "yarn check && yarn lint",
@@ -17,7 +17,9 @@
     "verify:publication": "node scripts/verify-publication.cjs"
   },
   "workspaces": [
-    "packages/*"
+    "packages/app",
+    "packages/service",
+    "packages/utils"
   ],
   "dependencies": {
     "core-js": "3.48.0",
@@ -56,7 +58,7 @@
     "postcss-preset-env": "8.5.1",
     "prettier": "3.8.1",
     "sass": "1.97.3",
-    "sass-loader": "13.3.3",
+    "sass-loader": "13.3.4",
     "sucrase": "3.35.1",
     "typescript": "5.9.3",
     "webpack": "5.105.0",
