@@ -1,12 +1,14 @@
 import { readLaunchPointIcon, type IconRequest } from './app-catalog';
 import { HomeBackBootstrap } from './bootstrap';
 import { Service, ServiceError } from './bus';
-import { APPLICATION_MANAGER_URI, APP_ID, APP_VERSION, SERVICE_ID } from './environment';
+import { APPLICATION_MANAGER_URI, APP_ID, APP_VERSION, PIP_APP_ID, SERVICE_ID } from './environment';
 import { HttpPreviewServer } from './http-server';
+import { ManualCameraPip } from './manual-camera-pip';
 import {
 	buildPreviewToastRequest,
 	PreviewNotificationState,
 	type PreviewNotificationRequest,
+	type RecentCameraEntry,
 } from './notification';
 import { PreviewNotificationService } from './preview-notification-service';
 import { micomKeycodeForRemoteButton, sendMicomKeycode } from './remote-key-sender';
@@ -21,6 +23,10 @@ const previewNotificationService = new PreviewNotificationService(
 	toast => service.oneshot(`${NOTIFICATION_URI}/createToast`, toast),
 	buildPreviewToastRequest,
 );
+const cameraPip = new ManualCameraPip(
+	(uri, params, timeoutMs) => service.oneshot(uri, params, timeoutMs),
+	PIP_APP_ID ?? 'com.homebrew.homeback.camera',
+);
 const httpPreviewServer = new HttpPreviewServer({
 	version: APP_VERSION ?? 'unknown',
 	createPreviewNotification: request =>
@@ -29,9 +35,23 @@ const httpPreviewServer = new HttpPreviewServer({
 
 const bootstrap = new HomeBackBootstrap(service);
 let shuttingDown = false;
+let selectedCameraId: string | null = null;
 
 type RemoteButtonRequest = {
 	button?: unknown;
+};
+
+type CameraOpenRequest = {
+	cameraId?: unknown;
+};
+
+const currentCamera = (): RecentCameraEntry | null => {
+	const cameras = previewNotificationState.listRecentCameras();
+	if (selectedCameraId) {
+		const selected = cameras.find(camera => camera.cameraId === selectedCameraId);
+		if (selected) return selected;
+	}
+	return cameras[0] ?? null;
 };
 
 const serviceStatus = (): Record<string, unknown> => ({
@@ -51,18 +71,18 @@ const shutdownService = (exitCode = 0): void => {
 			error instanceof Error ? error.name : 'UnknownError',
 		);
 	});
-	void Promise.all([stopRemoteInput, stopHttp]).finally(() => process.exit(exitCode));
+	const stopCamera = cameraPip.close().catch(error => {
+		console.error('Unable to cleanly close HomeBack camera PiP:', error);
+	});
+	void Promise.all([stopRemoteInput, stopHttp, stopCamera]).finally(() => process.exit(exitCode));
 };
 
-// `exit` is synchronous-only. Keep this as a last fail-open fallback if normal
-// async shutdown is skipped by an exception or direct process.exit call.
 process.once('exit', () => bootstrap.remoteInput.disarmTimedMappingsSync());
 process.once('SIGTERM', () => shutdownService(0));
 process.once('SIGINT', () => shutdownService(0));
 
 const selfStartRemoteInput = async (): Promise<void> => {
 	if (getUid() !== 0) return;
-
 	try {
 		await bootstrap.startRemoteInput();
 		console.log('HomeBack root helper self-started remote input.');
@@ -83,10 +103,7 @@ service.registerSimple<IconRequest>('/readIcon', async request => ({
 
 service.registerSimple('/bootstrap', async () => {
 	const result = await bootstrap.apply();
-	return {
-		done: true,
-		...result,
-	};
+	return { done: true, ...result };
 });
 
 service.registerSimple('/remote/start', async () => {
@@ -107,7 +124,6 @@ service.registerSimple<RemoteButtonRequest>('/remote/sendButton', async request 
 	if (getUid() !== 0) {
 		throw new ServiceError('HomeBack helper service is not running as root.', -401);
 	}
-
 	await sendMicomKeycode(micomKeycode);
 	return { done: true };
 });
@@ -119,6 +135,43 @@ service.registerSimple<PreviewNotificationRequest>('/notification/createPreviewT
 service.registerSimple('/cameras/list', () => ({
 	done: true,
 	cameras: previewNotificationState.listRecentCameras(),
+}));
+
+service.registerSimple('/cameras/current', () => ({
+	done: true,
+	camera: currentCamera(),
+}));
+
+service.registerSimple<CameraOpenRequest>('/cameras/open', async request => {
+	const cameras = previewNotificationState.listRecentCameras();
+	if (cameras.length === 0) throw new ServiceError('No recent camera event is available.', -404);
+
+	if (request?.cameraId !== undefined && typeof request.cameraId !== 'string') {
+		throw new ServiceError('cameraId must be a string.', -400);
+	}
+	const requestedId = typeof request?.cameraId === 'string' ? request.cameraId : null;
+	const camera = requestedId
+		? cameras.find(candidate => candidate.cameraId === requestedId) ?? null
+		: cameras[0] ?? null;
+	if (!camera) throw new ServiceError('Requested camera event is no longer available.', -404);
+
+	selectedCameraId = camera.cameraId;
+	const status = await cameraPip.open();
+	if (status.pipLastOutcome !== 'shown') {
+		const detail = status.pipLastError ? `: ${status.pipLastError}` : '';
+		throw new ServiceError(`Unable to open camera PiP (${status.pipLastReason ?? 'unknown'})${detail}`, -503);
+	}
+	return { done: true, cameraId: camera.cameraId, status };
+});
+
+service.registerSimple('/cameras/close', async () => ({
+	done: true,
+	status: await cameraPip.close(),
+}));
+
+service.registerSimple('/cameras/pipStatus', () => ({
+	done: true,
+	status: cameraPip.status(),
 }));
 
 service.registerSimple('/restartService', () => {
@@ -134,9 +187,7 @@ service.registerSimple('/restartApp', () => {
 			} catch {
 				// App may already be gone.
 			}
-
 			await new Promise(resolve => setTimeout(resolve, 400));
-
 			try {
 				await service.oneshot(`${APPLICATION_MANAGER_URI}/launch`, { id: APP_ID });
 			} catch (error) {
@@ -144,7 +195,6 @@ service.registerSimple('/restartApp', () => {
 			}
 		})();
 	}, 100);
-
 	return { done: true };
 });
 

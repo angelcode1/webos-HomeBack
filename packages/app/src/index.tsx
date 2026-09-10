@@ -1,15 +1,21 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
-import { luna } from './shared/services/luna';
 import { App } from './app';
 import { bootstrapHomeBack } from './bootstrap';
-import { hasCompletedSetup, markSetupComplete } from './setup-state';
+import { luna, LunaError } from './shared/services/luna';
+import {
+	hasCompletedSetup,
+	hasCurrentPermissionSchema,
+	markCurrentPermissionSchema,
+	markSetupComplete,
+} from './setup-state';
 
 import './app/styles/global.scss';
 
 const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
 const setupComplete = hasCompletedSetup(window.localStorage);
+const permissionSchemaCurrent = hasCurrentPermissionSchema(window.localStorage);
 let appRendered = false;
 
 const renderApp = (): void => {
@@ -51,11 +57,17 @@ type RemoteStatusResponse = {
 	};
 };
 
-/**
- * Normal HOME launches should not replay the privileged bootstrap path. Query
- * the cheap status endpoint first and only ask the idempotent remote/start path
- * to reconcile if the helper is not already healthy.
- */
+const markPermissionSchemaCurrent = (): void =>
+	markCurrentPermissionSchema(window.localStorage);
+
+const reconcileBootstrap = async (): Promise<void> => {
+	try {
+		await bootstrapHomeBack(markPermissionSchemaCurrent);
+	} catch (error) {
+		console.error('HomeBack client-permission reconciliation failed:', error);
+	}
+};
+
 const ensureRemoteInput = async (): Promise<void> => {
 	try {
 		const response = await luna<RemoteStatusResponse>(
@@ -64,21 +76,29 @@ const ensureRemoteInput = async (): Promise<void> => {
 		if (response.status.started && response.status.nativeOwnershipVerified) return;
 		await luna(`luna://${process.env.SERVICE_ID}/remote/start`);
 	} catch (error) {
+		if (error instanceof LunaError && error.errorCode === -401) {
+			await reconcileBootstrap();
+			return;
+		}
 		console.error('HomeBack background remote-input health check failed:', error);
 	}
 };
 
 if (setupComplete) {
 	renderApp();
-	void ensureRemoteInput();
+	if (permissionSchemaCurrent) {
+		void ensureRemoteInput();
+	} else {
+		void reconcileBootstrap();
+	}
 } else {
 	renderSetup();
-	void bootstrapHomeBack(() => markSetupComplete(window.localStorage))
+	void bootstrapHomeBack(() => {
+		markSetupComplete(window.localStorage);
+		markPermissionSchemaCurrent();
+	})
 		.then(state => {
 			if (state === 'restarting') {
-				// /restartApp is intentionally fire-and-forget in the helper. If SAM
-				// accepts the request but the subsequent relaunch fails, do not strand
-				// this still-running webview on the setup screen indefinitely.
 				setTimeout(renderApp, 3_000);
 				return;
 			}

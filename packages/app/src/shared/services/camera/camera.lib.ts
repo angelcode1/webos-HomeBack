@@ -5,6 +5,7 @@ export type CameraEntry = {
 	title: string;
 	message: string | null;
 	imageUrl: string;
+	streamUrl?: string | null;
 	durationMs: number;
 	receivedAt: number;
 	expiresAt: number;

@@ -22,6 +22,7 @@ const validCameraEntry = (value: unknown): value is CameraEntry => {
 		typeof camera.title === 'string' &&
 		(camera.message === null || typeof camera.message === 'string') &&
 		typeof camera.imageUrl === 'string' &&
+		(camera.streamUrl === undefined || camera.streamUrl === null || typeof camera.streamUrl === 'string') &&
 		typeof camera.durationMs === 'number' &&
 		Number.isFinite(camera.durationMs) &&
 		typeof camera.receivedAt === 'number' &&

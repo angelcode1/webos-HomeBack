@@ -5,6 +5,7 @@ const path = require('path');
 const root = path.resolve(__dirname, '..');
 const expectedCommand = 'eslint --ext .ts,.tsx,.js .';
 const workspaces = ['app', 'service', 'utils'];
+const extraTrees = ['pip-app'];
 const extensions = new Set(['.ts', '.tsx', '.js']);
 
 const walk = directory => {
@@ -37,6 +38,19 @@ for (const workspace of workspaces) {
 
 	console.log(
 		`${workspace}: ${files.length} lint candidates (${implementationFiles.length} implementation files)`,
+	);
+}
+
+for (const tree of extraTrees) {
+	const directory = path.join(root, 'packages', tree);
+	const files = walk(directory);
+	const implementationFiles = files.filter(file => !file.endsWith('.d.ts'));
+	if (implementationFiles.length === 0) {
+		console.error(`${tree}: no TypeScript/JavaScript implementation files would be linted`);
+		failed = true;
+	}
+	console.log(
+		`${tree}: ${files.length} explicit lint candidates (${implementationFiles.length} implementation files)`,
 	);
 }
 

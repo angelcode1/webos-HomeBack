@@ -3,11 +3,7 @@ import { DefinePlugin } from 'webpack';
 import CopyPlugin from 'copy-webpack-plugin';
 
 import { createManifestTransformer } from '../../build/manifest-transform';
-import {
-	APP_ID,
-	APP_VERSION,
-	SERVICE_ID,
-} from '../../build/project';
+import { APP_ID, APP_VERSION, PIP_APP_ID, SERVICE_ID } from '../../build/project';
 
 const transformManifest = createManifestTransformer({
 	APP_ID,
@@ -58,6 +54,7 @@ const config = (
 			'process.env.APP_ID': JSON.stringify(APP_ID),
 			'process.env.APP_VERSION': JSON.stringify(APP_VERSION),
 			'process.env.SERVICE_ID': JSON.stringify(SERVICE_ID),
+			'process.env.PIP_APP_ID': JSON.stringify(PIP_APP_ID),
 		}),
 		new CopyPlugin({
 			patterns: [
