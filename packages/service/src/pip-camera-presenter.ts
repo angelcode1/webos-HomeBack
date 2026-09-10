@@ -1,17 +1,20 @@
-import { APPLICATION_MANAGER_URI } from './environment';
 import type { RecentCameraEntry } from './notification';
 
 const SURFACE_MANAGER_FOREGROUND_URI =
 	'luna://com.webos.surfacemanager/getForegroundAppInfo';
 const MULTIVIEW_LAUNCH_URI =
 	'luna://com.webos.service.multiviewcontroller/launchApps';
-const APPLICATION_CLOSE_URI = `${APPLICATION_MANAGER_URI}/closeByAppId`;
+const APPLICATION_CLOSE_URI =
+	'luna://com.webos.service.applicationManager/closeByAppId';
 
 const CARD_WINDOW_TYPE = '_WEBOS_WINDOW_TYPE_CARD';
 const MULTIVIEW_VIEW_TYPE = 'mvpip';
 const NORMAL_VIEW_TYPE = 'normal';
 const DEFAULT_POLL_INTERVAL_MS = 250;
-const DEFAULT_ADMISSION_CHECKS = 11;
+const DEFAULT_ADMISSION_CHECKS = 9;
+const SURFACE_QUERY_TIMEOUT_MS = 500;
+const MULTIVIEW_LAUNCH_TIMEOUT_MS = 750;
+const COMPANION_CLOSE_TIMEOUT_MS = 500;
 const DEFAULT_PIP_APP_ID = 'com.homebrew.homeback.camera';
 
 export const AUTOMATIC_PIP_MAIN_APP_IDS = [
@@ -210,13 +213,17 @@ export class PipCameraPresenter {
 		}
 
 		try {
-			await this.call(MULTIVIEW_LAUNCH_URI, {
-				apps: [
-					{ appId: main.appId, role: 'main', order: 0 },
-					{ appId: this.pipAppId, role: 'sub', order: 1 },
-				],
-				mode: 'pip',
-			});
+			await this.call(
+				MULTIVIEW_LAUNCH_URI,
+				{
+					apps: [
+						{ appId: main.appId, role: 'main', order: 0 },
+						{ appId: this.pipAppId, role: 'sub', order: 1 },
+					],
+					mode: 'pip',
+				},
+				MULTIVIEW_LAUNCH_TIMEOUT_MS,
+			);
 		} catch (error) {
 			this.recordFallback('launch-rejected', main.appId, error);
 			await this.closeCompanion();
@@ -225,18 +232,17 @@ export class PipCameraPresenter {
 
 		for (let check = 0; check < this.admissionChecks; check += 1) {
 			if (check > 0) await this.sleep(this.pollIntervalMs);
+			let current: SurfaceSnapshot;
 			try {
-				const current = await this.readSurface();
-				if (this.isAdmitted(current, main.appId)) {
-					this.recordShown(main.appId, 'admitted');
-					return true;
-				}
+				current = await this.readSurface();
 			} catch (error) {
-				if (check === this.admissionChecks - 1) {
-					this.recordFallback('admission-query-failed', main.appId, error);
-					await this.closeCompanion();
-					return false;
-				}
+				this.recordFallback('admission-query-failed', main.appId, error);
+				await this.closeCompanion();
+				return false;
+			}
+			if (this.isAdmitted(current, main.appId)) {
+				this.recordShown(main.appId, 'admitted');
+				return true;
 			}
 		}
 
@@ -246,7 +252,11 @@ export class PipCameraPresenter {
 	}
 
 	private async readSurface(): Promise<SurfaceSnapshot> {
-		const response = await this.call(SURFACE_MANAGER_FOREGROUND_URI, { subscribe: false });
+		const response = await this.call(
+			SURFACE_MANAGER_FOREGROUND_URI,
+			{ subscribe: false },
+			SURFACE_QUERY_TIMEOUT_MS,
+		);
 		return parseSurfaceSnapshot(response);
 	}
 
@@ -276,7 +286,11 @@ export class PipCameraPresenter {
 
 	private async closeCompanion(): Promise<void> {
 		try {
-			await this.call(APPLICATION_CLOSE_URI, { id: this.pipAppId }, 2_000);
+			await this.call(
+				APPLICATION_CLOSE_URI,
+				{ id: this.pipAppId },
+				COMPANION_CLOSE_TIMEOUT_MS,
+			);
 		} catch {
 			// Already-closed or unavailable companion is harmless.
 		}
