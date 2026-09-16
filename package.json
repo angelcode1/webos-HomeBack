@@ -62,7 +62,7 @@
     "sucrase": "3.35.1",
     "typescript": "5.9.3",
     "webpack": "5.105.0",
-    "webpack-cli": "5.1.0",
+    "webpack-cli": "5.1.4",
     "webpack-dev-server": "4.15.2"
   },
   "dependenciesMeta": {
