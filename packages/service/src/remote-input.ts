@@ -21,6 +21,7 @@ import { hasVerifiedNativeOwnership } from './remote-input-ownership';
 import { NativeConfigWriter } from './native-config-writer';
 import { RemoteActionRunner } from './remote-action-runner';
 import {
+	DEFAULT_LONG_PRESS_MS,
 	type RemoteConfig,
 	type RemoteMapping,
 	validateConfig,
@@ -45,7 +46,6 @@ const LEGACY_SERVICE_DIRS = [
 const LOG_POLL_MS = 80;
 const PROCESS_SCAN_MS = 2_000;
 const CONFIG_SCAN_MS = 1_000;
-const DEFAULT_LONG_PRESS_MS = 650;
 
 const configFingerprint = (stat: { mtimeMs: number; size: number; ino: number }): string =>
 	`${stat.mtimeMs}:${stat.size}:${stat.ino}`;

@@ -28,8 +28,6 @@ const defaultProcFileSystem: ProcFileSystem = {
  * former comm + stat pair with one identity syscall per live PID.
  */
 export class ProcessScanner {
-	private readonly identityCache = new Map<number, ProcIdentity>();
-
 	public constructor(
 		private readonly targetNames: ReadonlySet<string>,
 		private readonly hookLibraryPath: string,
@@ -47,24 +45,18 @@ export class ProcessScanner {
 		}
 
 		const targets = new Map<number, ProcTargetSnapshot>();
-		const livePids = new Set<number>();
 		for (const entry of entries) {
 			if (!/^\d+$/.test(entry)) continue;
 			const pid = Number(entry);
-			livePids.add(pid);
 
 			const identity = await this.readIdentity(pid);
 			if (!identity) continue;
-			this.identityCache.set(pid, identity);
 			if (!this.targetNames.has(identity.name)) continue;
 
 			const inspection = await this.inspectMappedHook(pid);
 			targets.set(pid, { pid, ...identity, ...inspection });
 		}
 
-		for (const pid of [...this.identityCache.keys()]) {
-			if (!livePids.has(pid)) this.identityCache.delete(pid);
-		}
 		return targets;
 	}
 
