@@ -1,20 +1,83 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320">
   <title>HomeBack</title>
-  <desc>Home symbol above a counter-clockwise return arrow</desc>
+  <desc>Flat LG-red HomeBack icon with cleaned house geometry and internal return arrow.</desc>
 
+  <!-- LG-red launcher tile -->
   <rect width="320" height="320" rx="64" fill="#A50034"/>
 
-  <!-- Refined classic home glyph from the new launcher design. -->
-  <path d="M160 54L236 118V132H214V216H106V132H84V118L160 54Z" fill="#FFFFFF"/>
-  <rect x="136" y="160" width="48" height="56" rx="5" fill="#A50034"/>
+  <!-- CLEAN HOUSE SILHOUETTE -->
+  <path fill="#FFFFFF" d="
+    M160 58
+    C156 58 153 59 150 62
 
-  <!-- Reverse-Amazon-smile return arrow restored from the previous HomeBack icon. -->
-  <path d="M244 190C237 239 198 270 151 270C104 270 66 244 51 205"
-        fill="none" stroke="#FF0844" stroke-width="34" stroke-linecap="round"/>
-  <path d="M244 190C237 239 198 270 151 270C104 270 66 244 51 205"
-        fill="none" stroke="#6B6B6B" stroke-width="22" stroke-linecap="round"/>
-  <path d="M51 205L34 237M51 205L86 211"
-        fill="none" stroke="#FF0844" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M51 205L34 237M51 205L86 211"
-        fill="none" stroke="#6B6B6B" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+    L39 150
+    C35 153 33 157 34 162
+    C35 168 40 172 47 172
+    H59
+    C64 172 67 175 67 180
+
+    V245
+    C67 254 74 261 83 261
+    H237
+    C246 261 253 254 253 245
+
+    V180
+    C253 175 256 172 261 172
+    H278
+    C284 172 288 169 290 164
+    C292 159 290 154 286 151
+
+    L255 125
+    V85
+    C255 81 252 78 248 78
+    H225
+    C221 78 219 81 219 85
+    V98
+    C219 101 216 102 214 100
+
+    L169 62
+    C166 59 164 58 160 58
+    Z
+  "/>
+
+  <!-- CLEAN INTERNAL RETURN ARROW
+       Same placement and visual language as the previous version,
+       but with straight/smooth vector edges instead of traced wobble. -->
+  <path fill="#A50034" d="
+    M89 146
+    L143 103
+    C147 100 150 99 153 99
+    C156 99 158 101 158 105
+
+    V124
+    C158 128 160 129 164 129
+    H201
+    C207 129 211 131 216 135
+
+    L242 158
+    C244 160 245 162 244 164
+    C243 166 241 166 238 166
+
+    H148
+    C145 166 143 168 143 171
+    V188
+    C143 192 141 194 138 194
+    C136 194 134 193 132 191
+
+    L90 156
+    C87 154 85 151 86 149
+    C86 148 87 147 89 146
+    Z
+  "/>
+
+  <!-- CLEAN DOOR CUTOUT -->
+  <path fill="#A50034" d="
+    M129 261
+    V219
+    C129 208 137 200 148 200
+    H173
+    C184 200 192 208 192 219
+    V261
+    Z
+  "/>
 </svg>
