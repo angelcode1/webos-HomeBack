@@ -1,3 +1,5 @@
+import { clampInteger, normalizedText } from '@homeback/utils';
+
 import type { PreviewLaunchPayload } from 'shared/api/common';
 
 export const PREVIEW_DEFAULT_DURATION_MS = 8_000;
@@ -17,15 +19,9 @@ export type PreviewPayload = {
 	durationMs: number;
 };
 
-export const clampPreviewDuration = (durationMs: unknown): number => {
-	if (typeof durationMs !== 'number' || !Number.isFinite(durationMs)) {
-		return PREVIEW_DEFAULT_DURATION_MS;
-	}
-	return Math.min(
-		PREVIEW_MAX_DURATION_MS,
-		Math.max(PREVIEW_MIN_DURATION_MS, Math.trunc(durationMs)),
-	);
-};
+export const clampPreviewDuration = (durationMs: unknown): number =>
+	clampInteger(durationMs, PREVIEW_MIN_DURATION_MS, PREVIEW_MAX_DURATION_MS) ??
+	PREVIEW_DEFAULT_DURATION_MS;
 
 export const previewImageHost = (imageUrl: string): string => {
 	try {
@@ -34,12 +30,6 @@ export const previewImageHost = (imageUrl: string): string => {
 	} catch {
 		return 'invalid';
 	}
-};
-
-const normalizedText = (value: unknown, maxLength: number): string | null => {
-	if (typeof value !== 'string') return null;
-	const normalized = value.trim();
-	return normalized ? normalized.slice(0, maxLength) : null;
 };
 
 const normalizedUrl = (value: unknown): string | null => {

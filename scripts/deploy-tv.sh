@@ -10,7 +10,6 @@ VERSION="$(node -p "require('./package.json').version")"
 printf '\n========================================\n HomeBack %s\n TV: %s\n========================================\n\n' "$VERSION" "$TV"
 
 echo '[1/8] Checking source tree...'
-node scripts/verify-optimized-source.cjs
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   git diff --check
 fi

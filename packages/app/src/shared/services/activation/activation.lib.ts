@@ -1,3 +1,5 @@
+import { HOME_BACK_PREVIEW_INTENT, HOME_BACK_SHOW_INTENT } from '@homeback/utils';
+
 import type { ActivateType, PreviewLaunchPayload } from 'shared/api/common';
 
 export type ActivationAction =
@@ -6,8 +8,8 @@ export type ActivationAction =
 	| { type: 'toggleLauncher' }
 	| { type: 'none' };
 
-const SHOW_HOME_BACK_INTENT = 'homeback:show';
-const PREVIEW_INTENT = 'homeback:preview';
+const SHOW_HOME_BACK_INTENT = HOME_BACK_SHOW_INTENT;
+const PREVIEW_INTENT = HOME_BACK_PREVIEW_INTENT;
 
 const previewPayload = (activation: ActivateType): PreviewLaunchPayload => {
 	const preview = activation.preview;

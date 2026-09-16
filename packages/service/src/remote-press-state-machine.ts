@@ -1,7 +1,11 @@
 import type { RemoteActionRunner } from './remote-action-runner';
-import { isTimedMapping, type RemoteConfig, type TimedMapping } from './remote-config.ts';
+import {
+	DEFAULT_LONG_PRESS_MS,
+	isTimedMapping,
+	type RemoteConfig,
+	type TimedMapping,
+} from './remote-config.ts';
 
-const DEFAULT_LONG_PRESS_MS = 650;
 const ACTION_COOLDOWN_MS = 150;
 const MAX_STUCK_PRESS_GRACE_MS = 5_000;
 

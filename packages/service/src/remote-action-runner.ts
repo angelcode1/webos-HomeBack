@@ -1,5 +1,7 @@
 import { spawn } from 'child_process';
 
+import { HOME_BACK_SHOW_INTENT } from '@homeback/utils';
+
 import type { Service } from './bus';
 import { APPLICATION_MANAGER_URI, APP_ID } from './environment';
 import { micomKeycodeForUinput } from './micom-keycodes';
@@ -47,7 +49,9 @@ export class RemoteActionRunner {
 				case 'ignore':
 					break;
 				case 'launch': {
-					const params = action.params ?? (action.id === APP_ID ? { intent: 'homeback:show' } : undefined);
+					const params =
+						action.params ??
+						(action.id === APP_ID ? { intent: HOME_BACK_SHOW_INTENT } : undefined);
 					await this.service.oneshot(`${APPLICATION_MANAGER_URI}/launch`, {
 						id: action.id,
 						...(params ? { params } : {}),

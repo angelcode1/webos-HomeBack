@@ -29,6 +29,8 @@ export type RemoteConfig = {
 	keys: Record<string, RemoteMapping>;
 };
 
+export const DEFAULT_LONG_PRESS_MS = 650;
+
 const MAX_KEYCODE = 0x7fffffff;
 const MAX_LONG_PRESS_MS = 60_000;
 
