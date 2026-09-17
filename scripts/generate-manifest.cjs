@@ -15,6 +15,22 @@ const RAW_SOURCE_URL = SOURCE_URL.replace('github.com', 'raw.githubusercontent.c
 const ICON_URI = `${RAW_SOURCE_URL}/main/packages/app/manifests/icon130.png`;
 const CAMERA_ICON_URI = `${RAW_SOURCE_URL}/main/packages/pip-app/manifests/icon130.png`;
 const CAMERA_DESCRIPTION = 'Camera PiP companion for HomeBack Home Assistant notifications.';
+const LONG_DESCRIPTION = [
+	'A fast replacement Home launcher and remote-button remapper for rooted LG webOS TVs.',
+	'',
+	'## Features',
+	'- Compact, scrollable app ribbon in place of the stock Home screen',
+	'- Quick access to inputs and a numeric keypad with color-key shortcuts',
+	'- Customizable remote button mappings for short and long presses',
+	'- Optional Home Assistant camera notifications with a native picture-in-picture viewer',
+	'',
+	'HOME tap opens the ribbon; HOME hold (~650ms) still reaches the stock LG Home screen. Requires a rooted webOS 6+ TV with Homebrew Channel installed.',
+].join('\n');
+const CAMERA_LONG_DESCRIPTION = [
+	'Camera PiP companion for HomeBack Home Assistant notifications.',
+	'',
+	"Shows an incoming camera snapshot in a native picture-in-picture window when HomeBack receives a Home Assistant notification — launched manually, so it never interrupts what you're watching on its own.",
+].join('\n');
 
 const serializeJson = value => `${JSON.stringify(value, null, 2)}\n`;
 
@@ -86,7 +102,7 @@ const buildCatalogArtifacts = ({
 		id: pkg.id,
 		version,
 		title: TITLE,
-		description: pkg.description,
+		description: LONG_DESCRIPTION,
 		iconUri: ICON_URI,
 		ipkHash,
 		ipkName,
@@ -97,7 +113,7 @@ const buildCatalogArtifacts = ({
 				id: CAMERA_ID,
 				version,
 				title: CAMERA_TITLE,
-				description: CAMERA_DESCRIPTION,
+				description: CAMERA_LONG_DESCRIPTION,
 				iconUri: CAMERA_ICON_URI,
 				ipkHash: cameraIpkHash,
 				ipkName: cameraIpkName,
