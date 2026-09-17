@@ -14,6 +14,8 @@ const SOURCE_URL = 'https://github.com/angelcode1/webos-HomeBack';
 const RAW_SOURCE_URL = SOURCE_URL.replace('github.com', 'raw.githubusercontent.com');
 const ICON_URI = `${RAW_SOURCE_URL}/main/packages/app/manifests/icon130.png`;
 const CAMERA_ICON_URI = `${RAW_SOURCE_URL}/main/packages/pip-app/manifests/icon130.png`;
+const FULL_DESCRIPTION_URL = `${RAW_SOURCE_URL}/main/webosbrew/homeback-description.html`;
+const CAMERA_FULL_DESCRIPTION_URL = `${RAW_SOURCE_URL}/main/webosbrew/homeback-camera-description.html`;
 const CAMERA_DESCRIPTION = 'Camera PiP companion for HomeBack Home Assistant notifications.';
 const LONG_DESCRIPTION = [
 	'A fast replacement Home launcher and remote-button remapper for rooted LG webOS TVs.',
@@ -71,11 +73,12 @@ const buildManifest = ({
 	ipkHash: { sha256: ipkHash.toLowerCase() },
 });
 
-const buildPackageEntry = ({ manifest, title, description, iconUri }) => ({
+const buildPackageEntry = ({ manifest, title, description, iconUri, fullDescriptionUrl }) => ({
 	id: manifest.id,
 	title,
 	iconUri,
 	shortDescription: description,
+	fullDescriptionUrl,
 	manifest,
 });
 
@@ -127,6 +130,7 @@ const buildCatalogArtifacts = ({
 			title: TITLE,
 			description: pkg.description,
 			iconUri: ICON_URI,
+			fullDescriptionUrl: FULL_DESCRIPTION_URL,
 		}),
 	];
 	if (cameraManifest) {
@@ -136,6 +140,7 @@ const buildCatalogArtifacts = ({
 				title: CAMERA_TITLE,
 				description: CAMERA_DESCRIPTION,
 				iconUri: CAMERA_ICON_URI,
+				fullDescriptionUrl: CAMERA_FULL_DESCRIPTION_URL,
 			}),
 		);
 	}
