@@ -13,16 +13,16 @@
       "shortDescription": "A fast replacement Home launcher and remote-button remapper for rooted LG webOS TVs.",
       "manifest": {
         "id": "com.homebrew.homeback",
-        "version": "0.6.9",
+        "version": "0.7.0",
         "type": "web",
         "title": "HomeBack",
         "appDescription": "A fast replacement Home launcher and remote-button remapper for rooted LG webOS TVs.",
         "iconUri": "https://raw.githubusercontent.com/angelcode1/webos-HomeBack/main/packages/app/manifests/icon130.png",
         "sourceUrl": "https://github.com/angelcode1/webos-HomeBack",
         "rootRequired": true,
-        "ipkUrl": "https://github.com/angelcode1/webos-HomeBack/releases/download/v0.6.9/com.homebrew.homeback_0.6.9_all.ipk",
+        "ipkUrl": "https://github.com/angelcode1/webos-HomeBack/releases/download/v0.7.0/com.homebrew.homeback_0.7.0_all.ipk",
         "ipkHash": {
-          "sha256": "11d43bb6e124ee6ddbb5404ad3cd2dcc969cbbb7caac865fd462fbbeae2eebda"
+          "sha256": "55d5eec8edec4b9b7f0831000d6d52c8adf8f8cb6d1ab8dded8104e08ba926b1"
         }
       }
     },
@@ -33,16 +33,16 @@
       "shortDescription": "Camera PiP companion for HomeBack Home Assistant notifications.",
       "manifest": {
         "id": "com.homebrew.homeback.camera",
-        "version": "0.6.9",
+        "version": "0.7.0",
         "type": "web",
         "title": "HomeBack Camera",
         "appDescription": "Camera PiP companion for HomeBack Home Assistant notifications.",
         "iconUri": "https://raw.githubusercontent.com/angelcode1/webos-HomeBack/main/packages/pip-app/manifests/icon130.png",
         "sourceUrl": "https://github.com/angelcode1/webos-HomeBack",
         "rootRequired": true,
-        "ipkUrl": "https://github.com/angelcode1/webos-HomeBack/releases/download/v0.6.9/com.homebrew.homeback.camera_0.6.9_all.ipk",
+        "ipkUrl": "https://github.com/angelcode1/webos-HomeBack/releases/download/v0.7.0/com.homebrew.homeback.camera_0.7.0_all.ipk",
         "ipkHash": {
-          "sha256": "128c8be92abc482ca06447b0138cb03c667db51d90fcc322eda20fb6040e18e9"
+          "sha256": "442f92579c5bee0d952b863e3647b5a571ee94dcd55b2228cd57bda9c6b9e745"
         }
       }
     }
