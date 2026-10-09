@@ -48,3 +48,29 @@ A community package named `org.webosbrew.inputhook_1.5.0_all.ipk` has been publi
 ## webOS Homebrew Channel
 
 HomeBack integrates with the webOS Homebrew Channel's root service and `/var/lib/webosbrew/init.d` boot-hook mechanism, but does not incorporate the Homebrew Channel source code into HomeBack.
+
+## New source-built native input hook (review branch)
+
+The `review/source-built-remote-hook-c5` branch removes the opaque native
+binaries listed in the preceding historical section from the source tree.
+The exact compiler inputs and hashes are pinned in `native/source-lock.json`
+and all modified-source transformations are in `native/patch-inputhook.py`.
+
+- Source: https://github.com/sundermann/inputhookpp,
+  pinned commit `9dc3cf140cb1ae1dbe059525c72710deea7ecf7d`.
+  License: **GPL-3.0**, in `INPUTHOOKPP-GPL-3.0.txt` inside build artifacts/IPKs.
+- Injector: https://github.com/smx-smx/ezinject,
+  pinned commit `607055c06b037eadc3992008940d99bdc4a14f53`.
+  See `EZINJECT-COPYING.txt` included in packages.
+- Source/build provenance: `native/build-native.sh`,
+  `native/patch-inputhook.py`, `native/source-lock.json`,
+  and `SOURCE-LOCK.txt` emitted per build.
+
+**License-compatibility gate remains open.** HomeBack is declared GPL-2.0-only
+from AltHome. The inputhookpp native component is GPLv3. Separately compiling
+and installing it with HomeBack does not automatically resolve the question of
+whether the particular combined distribution is permitted. Do not assert that
+a stable public Homebrew catalog release has been legally cleared until the
+upstream code and modified-source obligations have been reviewed by an
+appropriate maintainer. The previous note above remains as historical provenance
+of the **old** releases, not as a description of newly compiled native payloads.
