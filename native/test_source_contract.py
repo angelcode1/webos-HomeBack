@@ -28,6 +28,21 @@ class SourceBuildContract(unittest.TestCase):
         self.assertIn('c5-inputhookpp-source-candidate', workflow)
         self.assertIn('homeback-c5-native-test-0.7.2', workflow)
 
+    def test_no_executables_tracked_and_ci_sources_before_packaging(self):
+        import subprocess
+        tracked = subprocess.check_output([
+            'git', '-C', str(ROOT), 'ls-files', '--',
+            'packages/service/vendor/inputhook/ezinject',
+            'packages/service/vendor/inputhook/libinputhookpp.so',
+        ], text=True)
+        self.assertEqual(tracked.strip(), '')
+        for pipeline in ('.github/workflows/ci.yml', '.github/workflows/release.yml'):
+            code = (ROOT / pipeline).read_text()
+            self.assertIn('bash native/build-native.sh', code)
+            self.assertIn('cp native-artifacts/ezinject', code)
+            self.assertIn('cp native-artifacts/libinputhookpp.so', code)
+            self.assertLess(code.index('bash native/build-native.sh'), code.index('yarn build'))
+
     def test_patch_preserves_event_log_contract_and_rejects_unknown_sources(self):
         patch = (ROOT / 'native/patch-inputhook.py').read_text()
         self.assertIn('Preserve upstream', patch)
