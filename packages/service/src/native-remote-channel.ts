@@ -16,6 +16,10 @@ const MAX_EVENT_BYTES = 128;
  * native hook PASS its keys instead of trapping the remote.
  */
 export class NativeRemoteChannel {
+  public constructor(private readonly runtimeDir = NATIVE_IPC_DIR) {}
+  private get eventSocket(): string { return `${this.runtimeDir}/events.sock`; }
+  private get leasePath(): string { return `${this.runtimeDir}/lease`; }
+
   private server: Server | null = null;
   private leaseTimer: NodeJS.Timeout | null = null;
   private leaseInFlight = false;
@@ -30,20 +34,20 @@ export class NativeRemoteChannel {
 
   public async start(onEvent: (keycode: number, state: number) => void): Promise<void> {
     if (this.server) return;
-    await fs.mkdir(NATIVE_IPC_DIR, { recursive: true, mode: 0o700 });
-    await fs.chmod(NATIVE_IPC_DIR, 0o700);
+    await fs.mkdir(this.runtimeDir, { recursive: true, mode: 0o700 });
+    await fs.chmod(this.runtimeDir, 0o700);
     try {
-      const existing = await fs.lstat(NATIVE_EVENT_SOCKET);
+      const existing = await fs.lstat(this.eventSocket);
       if (!existing.isSocket()) throw new Error('Native IPC path exists but is not a socket');
       try {
-        const lease = await fs.stat(NATIVE_LEASE_FILE);
+        const lease = await fs.stat(this.leasePath);
         if (Date.now() - lease.mtimeMs < 2_000 && lease.mtimeMs <= Date.now() + 1_000) {
           throw new Error('A live HomeBack remote-event listener already owns this socket');
         }
       } catch (error) {
         if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
       }
-      await fs.unlink(NATIVE_EVENT_SOCKET);
+      await fs.unlink(this.eventSocket);
     } catch (error) {
       if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
     }
@@ -78,12 +82,12 @@ export class NativeRemoteChannel {
     try {
       await new Promise<void>((resolve, reject) => {
         this.server!.once('error', reject);
-        this.server!.listen(NATIVE_EVENT_SOCKET, () => {
+        this.server!.listen(this.eventSocket, () => {
           this.server!.off('error', reject);
           resolve();
         });
       });
-      await fs.chmod(NATIVE_EVENT_SOCKET, 0o600);
+      await fs.chmod(this.eventSocket, 0o600);
       this.listening = true;
       console.log('HomeBack structured native remote events listening');
     } catch (error) {
@@ -99,7 +103,7 @@ export class NativeRemoteChannel {
       this.authorized = false;
       if (this.leaseTimer) clearInterval(this.leaseTimer);
       this.leaseTimer = null;
-      await fs.unlink(NATIVE_LEASE_FILE).catch(error => {
+      await fs.unlink(this.leasePath).catch(error => {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       });
       return;
@@ -119,10 +123,10 @@ export class NativeRemoteChannel {
   private async refreshLease(): Promise<void> {
     if (this.leaseInFlight || !this.authorized || !this.listening) return;
     this.leaseInFlight = true;
-    const temporary = `${NATIVE_LEASE_FILE}.${process.pid}.tmp`;
+    const temporary = `${this.leasePath}.${process.pid}.tmp`;
     try {
       await fs.writeFile(temporary, `${process.pid}\n`, { mode: 0o600 });
-      if (this.authorized && this.listening) await fs.rename(temporary, NATIVE_LEASE_FILE);
+      if (this.authorized && this.listening) await fs.rename(temporary, this.leasePath);
       else await fs.unlink(temporary).catch(() => undefined);
     } finally {
       this.leaseInFlight = false;
@@ -135,7 +139,7 @@ export class NativeRemoteChannel {
     const server = this.server;
     this.server = null;
     if (server) await new Promise<void>(resolve => server.close(() => resolve()));
-    await fs.unlink(NATIVE_EVENT_SOCKET).catch(error => {
+    await fs.unlink(this.eventSocket).catch(error => {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     });
   }
