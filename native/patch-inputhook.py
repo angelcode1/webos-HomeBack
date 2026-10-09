@@ -41,10 +41,10 @@ def patch(root: Path) -> None:
 static std::string shellQuote(const std::string& input) {
     std::string result("'");
     for (char value : input) {
-        if (value == '\'') result += "'\\''";
+        if (value == '\\'') result += "'\\\\''";
         else result.push_back(value);
     }
-    result.push_back('\'');
+    result.push_back('\\'');
     return result;
 }
 ''', 'safe launch JSON argument')
