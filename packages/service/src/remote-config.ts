@@ -153,12 +153,13 @@ export const validateConfig = (input: unknown): input is RemoteConfig => {
 export const buildNativeKeybinds = (
 	config: RemoteConfig,
 	timedMappingsArmed: boolean,
+	structuredEvents = false,
 ): Record<string, Record<string, unknown>> => {
 	const native: Record<string, Record<string, unknown>> = {};
 
 	for (const [key, mapping] of Object.entries(config.keys)) {
 		if (isTimedMapping(mapping)) {
-			if (timedMappingsArmed) native[key] = { action: 'ignore' };
+			if (timedMappingsArmed) native[key] = { action: structuredEvents ? 'timed_ignore' : 'ignore' };
 			continue;
 		}
 
