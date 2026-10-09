@@ -49,10 +49,10 @@ A community package named `org.webosbrew.inputhook_1.5.0_all.ipk` has been publi
 
 HomeBack integrates with the webOS Homebrew Channel's root service and `/var/lib/webosbrew/init.d` boot-hook mechanism, but does not incorporate the Homebrew Channel source code into HomeBack.
 
-## New source-built native input hook (review branch)
+## Source-built native input hook (HomeBack 0.7.2 onwards)
 
-The `review/source-built-remote-hook-c5` branch removes the opaque native
-binaries listed in the preceding historical section from the source tree.
+Starting with HomeBack 0.7.2, the opaque native binaries listed in the
+preceding historical section are no longer tracked in the source tree.
 The exact compiler inputs and hashes are pinned in `native/source-lock.json`
 and all modified-source transformations are in `native/patch-inputhook.py`.
 
@@ -66,11 +66,11 @@ and all modified-source transformations are in `native/patch-inputhook.py`.
   `native/patch-inputhook.py`, `native/source-lock.json`,
   and `SOURCE-LOCK.txt` emitted per build.
 
-**License-compatibility gate remains open.** HomeBack is declared GPL-2.0-only
-from AltHome. The inputhookpp native component is GPLv3. Separately compiling
-and installing it with HomeBack does not automatically resolve the question of
-whether the particular combined distribution is permitted. Do not assert that
-a stable public Homebrew catalog release has been legally cleared until the
-upstream code and modified-source obligations have been reviewed by an
-appropriate maintainer. The previous note above remains as historical provenance
-of the **old** releases, not as a description of newly compiled native payloads.
+**Distribution review required.** HomeBack's Node/JS application is a GPL-2.0-only
+AltHome derivative; inputhookpp's independently built native library is GPL-3.0.
+The native hook and HomeBack service communicate over a local Unix socket rather
+than linking HomeBack application code to inputhookpp, but installing them in one
+IPK alone does not settle whether the combination is mere aggregation. Public
+redistribution requires a maintainer decision, relevant license notices and
+corresponding source availability. The historical community-payload notice above
+applies only to older releases, not the 0.7.2 source-built binaries.
