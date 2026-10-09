@@ -25,6 +25,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: homeback-release-v${{ inputs.version }}
@@ -200,6 +201,9 @@ jobs:
             "${CAMERA_IPK_PATH}.sha256"
             "$MANIFEST_PATH"
             "$CAMERA_MANIFEST_PATH"
+            native-artifacts/SOURCE-LOCK.txt
+            native-artifacts/INPUTHOOKPP-GPL-3.0.txt
+            native-artifacts/EZINJECT-COPYING.txt
           )
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber
@@ -243,3 +247,31 @@ jobs:
 
           echo "Released catalog commit staged on ${CATALOG_BRANCH}."
           echo "Merge that branch to main through the normal protected pull-request path."
+
+      - name: Open protected-main PR for released Homebrew catalog
+        if: ${{ inputs.source_ref == 'main' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          CATALOG_BRANCH="release/catalog-v${VERSION}"
+          if ! git ls-remote --exit-code --heads origin "${CATALOG_BRANCH}" >/dev/null 2>&1; then
+            echo "Catalog already matched or the staging step had no branch to publish."
+            exit 0
+          fi
+
+          EXISTING="$(gh pr list --head "${CATALOG_BRANCH}" --base main --state open --json url --jq '.[0].url // empty' || true)"
+          if [ -n "$EXISTING" ]; then
+            echo "Existing catalog PR: $EXISTING"
+            exit 0
+          fi
+
+          if gh pr create \
+            --head "$CATALOG_BRANCH" --base main \
+            --title "Publish HomeBack ${VERSION} Homebrew catalog" \
+            --body "Align both repo.json and webosbrew/index.json with the published v${VERSION} main/camera IPKs and their verified SHA-256 hashes. The release workflow generated the manifest JSON files and uploaded them as release assets."; then
+            echo "Catalog PR created."
+          else
+            echo "::warning::The release was published but GitHub Actions could not open the catalog PR. Open the compare URL and create a PR manually."
+            echo "https://github.com/${GITHUB_REPOSITORY}/compare/main...${CATALOG_BRANCH}"
+          fi
