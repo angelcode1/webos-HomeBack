@@ -56,6 +56,10 @@ class CandidatePatchTests(unittest.TestCase):
         module_spec.loader.exec_module(candidate)
         # Representative known upstream sites; the patch must match all of them.
         cpp = '''#include <filesystem>
+    struct stat file_stat{};
+    time_t last_mtime = 0;
+            if (file_stat.st_mtime != last_mtime) {
+                last_mtime = file_stat.st_mtime;
         if (action == "ignore") {
         }
                     const std::string command =
