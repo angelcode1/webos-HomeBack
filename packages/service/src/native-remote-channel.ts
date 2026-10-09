@@ -99,6 +99,9 @@ export class NativeRemoteChannel {
   }
 
   public async setAuthorized(authorized: boolean): Promise<void> {
+    // A listener that never acquired the socket must not erase another
+    // HomeBack instance's lease during shutdown or failed startup.
+    if (!this.server && !this.listening) return;
     if (!authorized || !this.listening) {
       this.authorized = false;
       if (this.leaseTimer) clearInterval(this.leaseTimer);
@@ -134,6 +137,7 @@ export class NativeRemoteChannel {
   }
 
   public async stop(): Promise<void> {
+    if (!this.server) return;
     await this.setAuthorized(false);
     this.listening = false;
     const server = this.server;
