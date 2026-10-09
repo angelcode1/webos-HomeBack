@@ -55,6 +55,67 @@ static std::string shellQuote(const std::string& input) {
                             "luna-send -n 1 \\"luna://com.webos.applicationManager/launch\\" " + shellQuote(json.dump());'''
     c = replace_once(c, old_cmd, new_cmd, 'shell-quote Luna JSON')
 
+    c = replace_once(c, '#include <vector>\n', '''#include <vector>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <time.h>
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <unistd.h>
+
+// A stopped or wedged HomeBack service must never eat remote keys.
+// This lease is created only while HomeBack's ownership/event path is healthy.
+static bool homebackLeaseFresh() {
+    struct stat lease{};
+    if (stat("/tmp/homeback-remote-ipc/lease", &lease) != 0 ||
+        !S_ISREG(lease.st_mode)) return false;
+    struct timespec now{};
+    if (clock_gettime(CLOCK_REALTIME, &now) != 0) return false;
+    const int64_t ageNs = (static_cast<int64_t>(now.tv_sec) - lease.st_mtim.tv_sec) * 1000000000LL +
+                          (static_cast<int64_t>(now.tv_nsec) - lease.st_mtim.tv_nsec);
+    return ageNs >= 0 && ageNs <= 1500000000LL;
+}
+
+// Per-event local UNIX socket delivery, O_NONBLOCK + MSG_NOSIGNAL:
+// a crashed reader, full socket backlog or failed connect always passes the key.
+static bool homebackEmitEvent(int keycode, int state) {
+    if (!homebackLeaseFresh()) return false;
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    if (fd < 0) return false;
+    struct sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    const char* path = "/tmp/homeback-remote-ipc/events.sock";
+    if (strlen(path) >= sizeof(address.sun_path)) {
+        close(fd);
+        return false;
+    }
+    strncpy(address.sun_path, path, sizeof(address.sun_path) - 1);
+    if (connect(fd, reinterpret_cast<struct sockaddr*>(&address), sizeof(address)) != 0) {
+        close(fd);
+        return false;
+    }
+    char frame[64]{};
+    int length = snprintf(frame, sizeof(frame), "%d %d\\n", keycode, state);
+    bool ok = length > 0 && length < static_cast<int>(sizeof(frame)) &&
+              send(fd, frame, length, MSG_DONTWAIT | MSG_NOSIGNAL) == length;
+    close(fd);
+    return ok;
+}
+''', 'nonblocking structured remote event IPC')
+
+    c = replace_once(c, '''        if (action == "ignore") {
+''', '''        if (action == "timed_ignore") {
+            // Service-dependent mappings are never swallowed if the receiver
+            // is absent or its event-loop heartbeat has expired.
+            return homebackEmitEvent(keycode, state)
+                ? std::tuple<Action, int>{Action::IGNORE, keycode}
+                : std::tuple<Action, int>{Action::PASS, keycode};
+        }
+
+        if (action == "ignore") {
+''', 'service-lease based timed ignore')
+
     h = replace_once(h, '    std::mutex m_mutex{};\n', '''    std::mutex m_mutex{};
     // Serialize temporary edits to LG's shared keybind table until original returns.
     std::mutex m_keybind_mutex{};
