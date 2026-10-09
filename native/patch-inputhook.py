@@ -104,6 +104,24 @@ static bool homebackEmitEvent(int keycode, int state) {
 }
 ''', 'nonblocking structured remote event IPC')
 
+
+    c = replace_once(c, '''    struct stat file_stat{};
+    time_t last_mtime = 0;
+''', '''    struct stat file_stat{};
+    struct stat last_stat{};
+    bool has_last_stat = false;
+''', 'high-resolution config-change state')
+    c = replace_once(c, '''            if (file_stat.st_mtime != last_mtime) {
+                last_mtime = file_stat.st_mtime;
+''', '''            if (!has_last_stat ||
+                file_stat.st_ino != last_stat.st_ino ||
+                file_stat.st_size != last_stat.st_size ||
+                file_stat.st_mtim.tv_sec != last_stat.st_mtim.tv_sec ||
+                file_stat.st_mtim.tv_nsec != last_stat.st_mtim.tv_nsec) {
+                last_stat = file_stat;
+                has_last_stat = true;
+''', 'detect config replacement within the same second')
+
     c = replace_once(c, '''        if (action == "ignore") {
 ''', '''        if (action == "timed_ignore") {
             // Service-dependent mappings are never swallowed if the receiver
