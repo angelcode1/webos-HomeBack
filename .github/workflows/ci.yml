@@ -41,6 +41,18 @@ jobs:
           corepack prepare yarn@4.12.0 --activate
           yarn --version
 
+
+      - name: Cross-build native hook from pinned source
+        run: bash native/build-native.sh
+
+      - name: Stage source-built hook for HomeBack packaging
+        run: |
+          cp native-artifacts/ezinject packages/service/vendor/inputhook/ezinject
+          cp native-artifacts/libinputhookpp.so packages/service/vendor/inputhook/libinputhookpp.so
+          cp native-artifacts/INPUTHOOKPP-GPL-3.0.txt packages/service/vendor/inputhook/
+          cp native-artifacts/EZINJECT-COPYING.txt packages/service/vendor/inputhook/
+          cp native-artifacts/SOURCE-LOCK.txt packages/service/vendor/inputhook/
+          cp native-artifacts/NOT-QUALIFIED.txt packages/service/vendor/inputhook/
       - name: Install dependencies
         run: yarn install --immutable
 

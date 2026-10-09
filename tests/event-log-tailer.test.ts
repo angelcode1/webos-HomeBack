@@ -52,7 +52,9 @@ test('event log tailing remains pinned to the opened inode after pathname replac
 		// the sparse file, then ftruncate(fd) must truncate only the original inode.
 		ftruncateSync(fd, MAX_LOG_BYTES);
 		writeSync(fd, Buffer.from('\n'), 0, 1, MAX_LOG_BYTES - 1);
-		for (let index = 0; index < 12; index += 1) assert.equal(tailer.poll(() => undefined), true);
+		// Sparse garbage exceeds the bounded partial-line limit and intentionally
+		// reports unhealthy, while still draining/truncating the opened inode.
+		for (let index = 0; index < 12; index += 1) tailer.poll(() => undefined);
 		assert.equal(statSync(originalPath).size, 0);
 		assert.equal(readFileSync(victimPath, 'utf8'), 'DO NOT TOUCH\n');
 	} finally {
@@ -99,6 +101,23 @@ test('event log tailer reports a retained descriptor failure as unhealthy', () =
 		tailer.add(logPath, fd, 0, true);
 		closeSync(fd);
 		assert.equal(tailer.poll(() => undefined), false);
+	} finally {
+		tailer.closeAll();
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('oversized unterminated diagnostic log lines stay bounded and signal unhealthy', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'homeback-long-log-test-'));
+	const logPath = join(dir, 'hook.log');
+	writeFileSync(logPath, 'x'.repeat(70 * 1024), { mode: 0o600 });
+	const fd = openSync(logPath, fsConstants.O_RDWR | fsConstants.O_NOFOLLOW);
+	const tailer = new EventLogTailer();
+	try {
+		tailer.add(logPath, fd, 0, false);
+		assert.equal(tailer.poll(() => undefined), false);
+		appendFileSync(logPath, 'Key 773 is ignored\\n');
+		assert.equal(tailer.poll(() => undefined), true);
 	} finally {
 		tailer.closeAll();
 		rmSync(dir, { recursive: true, force: true });

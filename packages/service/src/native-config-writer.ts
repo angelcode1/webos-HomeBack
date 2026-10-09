@@ -3,14 +3,14 @@ import { promises as fs } from 'fs';
 import { buildNativeKeybinds, type RemoteConfig } from './remote-config.ts';
 import { writeFile, writeFileAtomicSync } from './utils.ts';
 
-const serializeNativeConfig = (config: RemoteConfig, timedMappingsArmed: boolean): string =>
-	`${JSON.stringify(buildNativeKeybinds(config, timedMappingsArmed), null, '\t')}\n`;
+const serializeNativeConfig = (config: RemoteConfig, timedMappingsArmed: boolean, structuredEvents: boolean): string =>
+	`${JSON.stringify(buildNativeKeybinds(config, timedMappingsArmed, structuredEvents), null, '\t')}\n`;
 
 export class NativeConfigWriter {
 	private armed = false;
 	private writeTail: Promise<void> = Promise.resolve();
 
-	public constructor(private readonly path: string) {}
+	public constructor(private readonly path: string, private readonly structuredEvents = false) {}
 
 	public get timedMappingsArmed(): boolean {
 		return this.armed;
@@ -34,12 +34,12 @@ export class NativeConfigWriter {
 	}
 
 	public disarmSync(config: RemoteConfig): void {
-		writeFileAtomicSync(this.path, serializeNativeConfig(config, false), 0o644);
+		writeFileAtomicSync(this.path, serializeNativeConfig(config, false, this.structuredEvents), 0o644);
 		this.armed = false;
 	}
 
 	private write(config: RemoteConfig, armed: boolean): Promise<void> {
-		const serialized = serializeNativeConfig(config, armed);
+		const serialized = serializeNativeConfig(config, armed, this.structuredEvents);
 		const run = this.writeTail.catch(() => undefined).then(async () => {
 			let current = '';
 			try {

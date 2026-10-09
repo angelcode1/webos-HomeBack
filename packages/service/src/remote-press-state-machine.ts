@@ -57,6 +57,13 @@ export class RemotePressStateMachine {
 		}
 	}
 
+	/** Structured event delivery is independent of diagnostic log formatting. */
+	public handleNativeEvent(keycode: number, state: number): void {
+		if (!Number.isInteger(keycode) || keycode < 0 || keycode > 0x7fffffff ||
+			!Number.isInteger(state) || state < 0 || state > 2) return;
+		this.handleState(keycode, state);
+	}
+
 	public handleLogLine(line: string): void {
 		let keycode: number | null = null;
 		let state: number | null = null;

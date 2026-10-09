@@ -1,0 +1,155 @@
+name: Build review-only native remote hook
+
+on:
+  pull_request:
+    paths:
+      - 'native/**'
+      - '.github/workflows/native-inputhook.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-c5-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate native source lock and build contracts
+        run: |
+          python3 -m unittest discover -s native -p 'test_*.py' -v
+      - name: Build from source with verified toolchain
+        run: bash native/build-native.sh
+      - name: Validate ARM ELF and source manifest
+        run: |
+          cd native-artifacts
+          sha256sum -c SHA256SUMS
+          readelf -h ezinject
+          readelf -h libinputhookpp.so
+          test -f NOT-QUALIFIED.txt
+      - name: Upload candidate (not a HomeBack APK)
+        uses: actions/upload-artifact@v4
+        with:
+          name: c5-inputhookpp-source-candidate
+          path: native-artifacts/
+          if-no-files-found: error
+          retention-days: 14
+
+  tv-c5-test-ipk:
+    name: Package experimental C5 TV IPK (artifact only)
+    needs: native-c5-candidate
+    if: ${{ github.event_name == 'pull_request' && github.head_ref == 'review/source-built-remote-hook-c5' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      TEST_VERSION: '0.7.2'
+    steps:
+      - name: Checkout exact reviewed commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Download built native candidate from this exact run
+        uses: actions/download-artifact@v4
+        with:
+          name: c5-inputhookpp-source-candidate
+          path: native-artifacts
+      - name: Verify candidate sources and license notices
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -p "require('./package.json').version")" = '0.7.2'
+          test -s native-artifacts/INPUTHOOKPP-GPL-3.0.txt
+          test -s native-artifacts/EZINJECT-COPYING.txt
+          test -s native-artifacts/NOT-QUALIFIED.txt
+          (cd native-artifacts && sha256sum -c SHA256SUMS)
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Install and validate application sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare yarn@4.12.0 --activate
+          yarn install --immutable
+          yarn check:full
+      - name: Stage source-built candidate in ephemeral workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -f native-artifacts/ezinject packages/service/vendor/inputhook/ezinject
+          cp -f native-artifacts/libinputhookpp.so packages/service/vendor/inputhook/libinputhookpp.so
+          cp native-artifacts/INPUTHOOKPP-GPL-3.0.txt packages/service/vendor/inputhook/
+          cp native-artifacts/EZINJECT-COPYING.txt packages/service/vendor/inputhook/
+          cp native-artifacts/SOURCE-LOCK.txt packages/service/vendor/inputhook/
+          cp native-artifacts/NOT-QUALIFIED.txt packages/service/vendor/inputhook/
+          cat > packages/service/vendor/inputhook/NOTICE.md <<'NOTICE'
+          HomeBack experimental C5 TV build; source-built native payload.
+          inputhookpp copyright remains with its authors; GPLv3.
+          Source: https://github.com/sundermann/inputhookpp
+          Pinned revision: 9dc3cf140cb1ae1dbe059525c72710deea7ecf7d
+          Patch and crossbuild: https://github.com/angelcode1/webos-HomeBack/tree/review/source-built-remote-hook-c5/native
+          See INPUTHOOKPP-GPL-3.0.txt for the full license.
+          ezinject copyright remains with its authors; see EZINJECT-COPYING.txt.
+          Source: https://github.com/smx-smx/ezinject
+          Pinned revision: 607055c06b037eadc3992008940d99bdc4a14f53
+          The native IPC and short/long Home handling were verified on an LG C5; broader device safety testing and license sign-off remain required.
+          NOTICE
+          test "$(node -p "require('./package.json').version")" = "$TEST_VERSION"
+      - name: Build versioned HomeBack TV test packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          yarn build
+          APP_ID="$(node -p "require('./package.json').id")"
+          MAIN_IPK="dist/${APP_ID}_${TEST_VERSION}_all.ipk"
+          CAMERA_IPK="dist/pip-camera/${APP_ID}.camera_${TEST_VERSION}_all.ipk"
+          test -s "$MAIN_IPK"
+          test -s "$CAMERA_IPK"
+          bash scripts/fix-ipk-installed-size.sh "$MAIN_IPK"
+          bash scripts/fix-ipk-installed-size.sh "$CAMERA_IPK"
+          echo "MAIN_IPK=$MAIN_IPK" >> "$GITHUB_ENV"
+          echo "CAMERA_IPK=$CAMERA_IPK" >> "$GITHUB_ENV"
+      - name: Assert packaged hook exactly matches compiled candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          TEMP="$(mktemp -d)"
+          trap 'rm -rf "$TEMP"' EXIT
+          ar p "$MAIN_IPK" data.tar.gz | tar -xzf - -C "$TEMP"
+          for file in ezinject libinputhookpp.so; do
+            mapfile -t paths < <(find "$TEMP" -type f -name "$file")
+            if [ "${#paths[@]}" -ne 1 ]; then
+              echo "Expected one packed $file; found ${#paths[@]}"
+              exit 1
+            fi
+            cmp "native-artifacts/$file" "${paths[0]}"
+            echo "Verified packaged candidate: $file"
+          done
+          mapfile -t licenses < <(find "$TEMP" -type f -name 'INPUTHOOKPP-GPL-3.0.txt')
+          test "${#licenses[@]}" -eq 1
+          sha256sum "$MAIN_IPK" > "${MAIN_IPK}.sha256"
+          sha256sum "$CAMERA_IPK" > "${CAMERA_IPK}.sha256"
+          cat "${MAIN_IPK}.sha256" "${CAMERA_IPK}.sha256"
+      - name: Upload test IPKs independent of public release
+        uses: actions/upload-artifact@v4
+        with:
+          name: homeback-c5-native-test-0.7.2
+          path: |
+            dist/*.ipk
+            dist/*.sha256
+            dist/pip-camera/*.ipk
+            dist/pip-camera/*.sha256
+            native-artifacts/SOURCE-LOCK.txt
+            native-artifacts/NOT-QUALIFIED.txt
+          if-no-files-found: error
+          retention-days: 14
