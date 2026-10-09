@@ -36,3 +36,46 @@ test('press state machine parses hook logs and fires short action on release', a
 	assert.equal(state.activeKeys.length, 0);
 	assert.equal(state.lastKeyEvent?.state, 0);
 });
+
+test('structured native Home press/release fires only the correct short or long action', async () => {
+	const calls: string[] = [];
+	const runner = {
+		lastAction: null,
+		execute: async (_action: SemanticAction, _keycode: number, kind: string) => {
+			calls.push(kind);
+		},
+	} as unknown as RemoteActionRunner;
+	const home: RemoteConfig = {
+		version: 1,
+		defaultLongPressMs: 100,
+		keys: {
+			773: {
+				short: { action: 'launch', id: 'com.homebrew.homeback' },
+				long: { action: 'launch', id: 'com.webos.app.home' },
+			},
+		},
+	};
+	const short = new RemotePressStateMachine(() => home, runner);
+	short.handleNativeEvent(773, 1);
+	short.handleNativeEvent(773, 0);
+	assert.deepEqual(calls, ['short']);
+	short.stop();
+
+	calls.length = 0;
+	const long = new RemotePressStateMachine(() => home, runner);
+	long.handleNativeEvent(773, 1);
+	await new Promise(resolve => setTimeout(resolve, 125));
+	long.handleNativeEvent(773, 0);
+	assert.deepEqual(calls, ['long']);
+	long.stop();
+});
+
+test('structured native input rejects malformed states before touching actions', () => {
+	const runner = { lastAction: null, execute: async () => undefined } as unknown as RemoteActionRunner;
+	const state = new RemotePressStateMachine(() => config, runner);
+	state.handleNativeEvent(-1, 1);
+	state.handleNativeEvent(1042, 9);
+	state.handleNativeEvent(0x80000000, 0);
+	assert.deepEqual(state.activeKeys, []);
+	assert.equal(state.lastKeyEvent, null);
+});
