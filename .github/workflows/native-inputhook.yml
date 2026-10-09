@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - name: Validate source-lock and unchanged APK baseline
+      - name: Validate native source lock and build contracts
         run: |
           python3 -m unittest discover -s native -p 'test_*.py' -v
       - name: Build from source with verified toolchain
@@ -63,7 +63,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(node -p "require('./package.json').version")" = '0.7.0'
+          test "$(node -p "require('./package.json').version")" = '0.7.2'
           test -s native-artifacts/INPUTHOOKPP-GPL-3.0.txt
           test -s native-artifacts/EZINJECT-COPYING.txt
           test -s native-artifacts/NOT-QUALIFIED.txt
@@ -73,7 +73,7 @@ jobs:
         with:
           node-version: '22'
           package-manager-cache: false
-      - name: Install and validate unchanged application sources
+      - name: Install and validate application sources
         shell: bash
         run: |
           set -euo pipefail
@@ -81,7 +81,7 @@ jobs:
           corepack prepare yarn@4.12.0 --activate
           yarn install --immutable
           yarn check:full
-      - name: Stage source-built candidate only in ephemeral workspace
+      - name: Stage source-built candidate in ephemeral workspace
         shell: bash
         run: |
           set -euo pipefail
@@ -101,16 +101,8 @@ jobs:
           ezinject copyright remains with its authors; see EZINJECT-COPYING.txt.
           Source: https://github.com/smx-smx/ezinject
           Pinned revision: 607055c06b037eadc3992008940d99bdc4a14f53
-          This native hook is unqualified on the physical LG C5; test and revert if needed.
+          The native IPC and short/long Home handling were verified on an LG C5; broader device safety testing and license sign-off remain required.
           NOTICE
-          node - <<'NODE'
-          const fs = require('node:fs');
-          const file = 'package.json';
-          const obj = JSON.parse(fs.readFileSync(file, 'utf8'));
-          if (obj.version !== '0.7.0') throw new Error('Unexpected original version');
-          obj.version = '0.7.2';
-          fs.writeFileSync(file, JSON.stringify(obj, null, 2) + '\n');
-          NODE
           test "$(node -p "require('./package.json').version")" = "$TEST_VERSION"
       - name: Build versioned HomeBack TV test packages
         shell: bash
