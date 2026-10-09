@@ -63,3 +63,20 @@ test('structured native writer arms only the leased timed-ignore action', async 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('failed second listener leaves the active owner socket and heartbeat intact', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'homeback-ipc-owner-'));
+  const first = new NativeRemoteChannel(dir);
+  const second = new NativeRemoteChannel(dir);
+  try {
+    await first.start(() => undefined);
+    await first.setAuthorized(true);
+    await assert.rejects(second.start(() => undefined), /already owns this socket/);
+    await second.stop();
+    assert.equal((await stat(path.join(dir, 'events.sock'))).isSocket(), true);
+    assert.equal((await stat(path.join(dir, 'lease'))).isFile(), true);
+  } finally {
+    await first.stop();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
