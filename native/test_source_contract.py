@@ -18,7 +18,12 @@ class SourceBuildContract(unittest.TestCase):
         workflow = (ROOT / '.github/workflows/native-inputhook.yml').read_text()
         self.assertIn('pull_request:', workflow)
         self.assertIn('workflow_dispatch:', workflow)
-        self.assertNotIn('release create', workflow)
+        candidate_job = workflow.split('  tv-c5-test-ipk:', 1)[0]
+        self.assertNotIn('release create', candidate_job)
+        self.assertIn('if: ${{ github.event_name ==', workflow)
+        self.assertIn("'review/source-built-remote-hook-c5'", workflow)
+        self.assertIn('--prerelease', workflow)
+        self.assertIn('Assert packaged hook exactly matches compiled candidate', workflow)
         self.assertNotIn('gh release', workflow)
         self.assertIn('c5-inputhookpp-source-candidate', workflow)
         self.assertIn('test -s packages/service/vendor/inputhook/libinputhookpp.so', workflow)
