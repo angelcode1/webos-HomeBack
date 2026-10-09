@@ -6,6 +6,7 @@ import {
 } from 'fs';
 
 const MAX_LOG_READ = 256 * 1024;
+const MAX_PARTIAL_LINE_BYTES = 64 * 1024;
 export const MAX_LOG_BYTES = 2 * 1024 * 1024;
 
 export type EventLogCursor = {
@@ -101,6 +102,13 @@ export class EventLogTailer {
 						const text = cursor.carry + this.readBuffer.subarray(0, bytesRead).toString('utf8');
 						const lines = text.split(/\r?\n/);
 						cursor.carry = lines.pop() ?? '';
+						if (Buffer.byteLength(cursor.carry, 'utf8') > MAX_PARTIAL_LINE_BYTES) {
+							// Malformed/unterminated diagnostic output cannot grow unbounded.
+							// A caller that relies on log consumption must fail open.
+							cursor.carry = '';
+							healthy = false;
+							console.warn(`Dropped oversized unterminated native log line from ${cursor.path}`);
+						}
 						for (const line of lines) onLine(line);
 					}
 				}
