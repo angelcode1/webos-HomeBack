@@ -108,7 +108,7 @@ jobs:
           const file = 'package.json';
           const obj = JSON.parse(fs.readFileSync(file, 'utf8'));
           if (obj.version !== '0.7.0') throw new Error('Unexpected original version');
-          obj.version = '0.7.1';
+          obj.version = '0.7.2';
           fs.writeFileSync(file, JSON.stringify(obj, null, 2) + '\n');
           NODE
           test "$(node -p "require('./package.json').version")" = "$TEST_VERSION"
