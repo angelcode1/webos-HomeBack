@@ -12,7 +12,7 @@ HomeBack is designed to feel like part of the TV rather than a separate launcher
 - **Cameras tile** — appears while a recent camera event is available; opens that camera in native LG PiP
 - **Custom remote mappings** — launch apps, replace keys, ignore keys, run short/long actions, or execute commands
 
-HomeBack includes its own remote-input service, so you **should not run the standalone LG Input Hook app at the same time**.
+HomeBack includes its own remote-input service and a native input hook built from pinned public sources. **Do not run the standalone LG Input Hook app alongside HomeBack**: both may try to intercept the same TV input processes.
 
 > **Requirements:** a rooted LG webOS TV with the webOS Homebrew Channel installed. HomeBack uses Homebrew's root capabilities and boot hooks. It is intended for webOS 6+.
 
@@ -423,13 +423,19 @@ A healthy HomeBack-owned setup normally reports:
 
 ```text
 started: true
-eventTailerHealthy: true
-timedMappingsArmed: true
-legacyInputHookDetected: false
+structuredEventsReady: true
+structuredEventsRejected: 0
 nativeOwnershipVerified: true
+timedMappingsArmed: true
+eventTailerHealthy: true
+legacyInputHookDetected: false
 ```
 
-`timedMappingsArmed` is intentionally fail-open: timed short/long mappings are only swallowed natively while the helper has a healthy retained event-log tailer and verified native ownership. If those conditions fail, HomeBack disarms the timed native `ignore` entries so affected buttons pass through rather than becoming dead system-wide.
+Since **v0.7.2**, short/long remote events reach HomeBack over a root-only **local Unix socket**, not by parsing diagnostic log messages. The `structuredEventsDelivered` count increases on intercepted press/release events. A short-lived service lease and nonblocking native socket delivery make timed-key interception **fail open**: if HomeBack becomes unresponsive or the event cannot be delivered, the affected key passes through to LG instead of being swallowed indefinitely. Input ownership checks also disarm timed mappings when the native hooks cannot be trusted. `eventTailerHealthy` describes the retained diagnostic logging path; it is no longer the primary event transport.
+
+On the tested LG C5, Home short press opened only the HomeBack ribbon, Home long press opened only LG Home, and event delivery remained healthy after reboot. Other TV models, standby/resume conditions and service-failure recovery require separate verification.
+
+See [native source build and IPC documentation](./native/README.md) and [the LG C5 acceptance checklist](./native/C5-TV-ACCEPTANCE.md).
 
 If `blockedHooks` is non-empty, do not force another injection. Inspect the reported reason first; in some cases rebooting the TV is the safest recovery.
 
@@ -452,42 +458,64 @@ Do not remove it unless you want to discard all of your custom mappings.
 
 ## Credits and upstream projects
 
-HomeBack stands on work from the webOS homebrew community. In particular:
+HomeBack builds on work from the webOS homebrew community:
 
-- **[AltHome by kitsuned](https://github.com/kitsuned/AltHome)** — the replacement-launcher project HomeBack was originally derived from. AltHome is licensed under GPL-2.0. HomeBack retains that GPL lineage.
-- **[LG Input Hook by Simon34545](https://github.com/Simon34545/lginputhook)** — the original open-source LG remote-button remapper and native-hook lineage that inspired HomeBack's integrated remote interception. The public upstream project is BSD-3-Clause licensed and its last public package/repository version is 1.4.0.
-- **smx-smx** — creator of `ezinject` / hookfactory, credited by the LG Input Hook project.
-- **Informatic** — creator of the original input-hook script, credited by the LG Input Hook project.
+- **[AltHome by kitsuned](https://github.com/kitsuned/AltHome)** — the GPL-2.0-licensed launcher from which HomeBack is derived; HomeBack retains its GPL-2.0-only lineage.
+- **[LG Input Hook by Simon34545](https://github.com/Simon34545/lginputhook)** — the earlier BSD-3-Clause remote-button-remapping project that informed HomeBack's architecture. It is **not** the codebase used for the current native build.
+- **[inputhookpp by sundermann](https://github.com/sundermann/inputhookpp)** — the current GPL-3.0 native hook source, pinned to an exact upstream commit and patched by HomeBack with reviewable source changes.
+- **[ezinject by smx-smx](https://github.com/smx-smx/ezinject)** — the current public injector source, also pinned to an exact commit with its upstream copyright and license notices preserved.
+- **Informatic** — credited by the earlier LG Input Hook project for its original input-hook script.
 
-### About the bundled native hook
+### Native input hook: built from public source since v0.7.2
 
-HomeBack currently bundles `ezinject` and `libinputhookpp.so` from an **unofficial community build commonly referred to as LG Input Hook 1.5.0**. It was obtained from the webOS community/Discord after the public 1.4.0 project stopped working on newer TVs. The author of those binary modifications and the corresponding modified source are not currently known.
+From **v0.7.2** onwards, the release pipeline cross-compiles the injector and native hook from pinned public sources for LG's **32-bit ARM userspace**, applies HomeBack's auditable patch, runs native contract tests, and packages the resulting build artifacts. The Git repository does **not** track precompiled native executables.
 
-HomeBack does **not** claim that the unofficial modified binary itself is authored by HomeBack or automatically covered by HomeBack's GPL-2.0 license. The public LG Input Hook source it descends from is BSD-3-Clause. Exact bundled-binary hashes and provenance notes are kept in [`packages/service/vendor/inputhook/NOTICE.md`](./packages/service/vendor/inputhook/NOTICE.md).
+- **Pinned upstream revisions and toolchain checksum:** [`native/source-lock.json`](./native/source-lock.json)
+- **Reproducible build and patch:** [`native/build-native.sh`](./native/build-native.sh) and [`native/patch-inputhook.py`](./native/patch-inputhook.py)
+- **Architecture, structured IPC and fail-open behavior:** [`native/README.md`](./native/README.md)
+- **Current notices and historical provenance:** [`packages/service/vendor/inputhook/NOTICE.md`](./packages/service/vendor/inputhook/NOTICE.md) and [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md)
 
-See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for the licensing breakdown.
+The native inputhookpp component is licensed **GPL-3.0** while HomeBack's AltHome-derived application remains **GPL-2.0-only**. The application communicates with the native hook over a local Unix socket rather than directly linking against it. Both components retain their own license and corresponding-source requirements; placing them in one installer is not, by itself, a conclusion about license compatibility. Earlier community builds are recorded only as historical provenance in the third-party notices.
+
+The physical LG C5 validated the v0.7.2 structured Home-button path and event delivery after reboot. The [HomeBack v0.7.2 release](https://github.com/angelcode1/webos-HomeBack/releases/tag/v0.7.2) includes the native source lock and relevant license notices.
 
 ## License
 
 HomeBack's source code is distributed under **GNU GPL v2.0 only (`GPL-2.0-only`)**, consistent with the AltHome codebase from which it is derived. See [LICENSE](./LICENSE).
 
-Third-party components and binaries keep their own rights and notices; see [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
+Third-party native components retain their own copyrights, licenses and source-provenance requirements; see [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
 
 ## Building from source
 
-Developer/build history and notes are in [`docs/history/BUILD-OPTIMIZED.md`](./docs/history/BUILD-OPTIMIZED.md).
+HomeBack requires **Node.js 22+** and **Yarn 4.12.0**. For a full build, use a **Linux host** with access to the pinned LG ARM cross-toolchain. The native source build must run **before** the webOS package build; `yarn build` intentionally refuses to package the service if the generated native artifacts have not been staged.
 
-The normal release gate is:
+On a supported Linux build host, from the repository root:
 
 ```sh
 corepack enable
 corepack prepare yarn@4.12.0 --activate
-corepack yarn install
+corepack yarn install --immutable
+
+# Compile pinned ARM32 native sources and verify their checksums.
+bash native/build-native.sh
+(cd native-artifacts && sha256sum -c SHA256SUMS)
+
+# Stage source-built artifacts and their notices for packaging.
+cp native-artifacts/ezinject native-artifacts/libinputhookpp.so \
+   native-artifacts/INPUTHOOKPP-GPL-3.0.txt \
+   native-artifacts/EZINJECT-COPYING.txt \
+   native-artifacts/SOURCE-LOCK.txt \
+   native-artifacts/NOT-QUALIFIED.txt \
+   packages/service/vendor/inputhook/
+
+python3 -m unittest discover -s native -p 'test_*.py' -v
 corepack yarn check:full
 corepack yarn build
 ```
 
-A successful camera-enabled build produces both the main HomeBack IPK and the separate `com.homebrew.homeback.camera_<version>_all.ipk` companion.
+The verified SDK may require elevated access for installation under `/opt`. Native artifacts are **generated locally or in CI**, not committed to Git. The [CI validation](./.github/workflows/ci.yml) and [guarded release workflow](./.github/workflows/release.yml) stage the source-built components automatically on Linux runners.
+
+The normal build produces both the main HomeBack IPK and the matching `com.homebrew.homeback.camera_<version>_all.ipk` companion. See [native build instructions](./native/README.md) for exact revisions and [historical build notes](./docs/history/BUILD-OPTIMIZED.md) for older procedures.
 
 ---
 
