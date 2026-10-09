@@ -1,0 +1,39 @@
+name: Build review-only native remote hook
+
+on:
+  pull_request:
+    paths:
+      - 'native/**'
+      - '.github/workflows/native-inputhook.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-c5-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate source-lock and unchanged APK baseline
+        run: |
+          python3 -m unittest discover -s native -p 'test_*.py' -v
+          test -s packages/service/vendor/inputhook/ezinject
+          test -s packages/service/vendor/inputhook/libinputhookpp.so
+      - name: Build from source with verified toolchain
+        run: bash native/build-native.sh
+      - name: Validate ARM ELF and source manifest
+        run: |
+          cd native-artifacts
+          sha256sum -c SHA256SUMS
+          readelf -h ezinject
+          readelf -h libinputhookpp.so
+          test -f NOT-QUALIFIED.txt
+      - name: Upload candidate (not a HomeBack APK)
+        uses: actions/upload-artifact@v4
+        with:
+          name: c5-inputhookpp-source-candidate
+          path: native-artifacts/
+          if-no-files-found: error
+          retention-days: 14
