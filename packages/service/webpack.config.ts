@@ -1,3 +1,5 @@
+import { existsSync } from 'fs';
+import { resolve } from 'path';
 import { DefinePlugin } from 'webpack';
 
 import CopyPlugin from 'copy-webpack-plugin';
@@ -10,6 +12,14 @@ const transformManifest = createManifestTransformer({
 	APP_VERSION,
 	SERVICE_ID,
 });
+
+// The repo no longer stores native executables. Fail package builds closed
+// unless the pinned source crossbuild has populated the service vendor path.
+for (const nativeFile of ['ezinject', 'libinputhookpp.so']) {
+  if (!existsSync(resolve(__dirname, 'vendor/inputhook', nativeFile))) {
+    throw new Error(`Missing source-built ${nativeFile}; run bash native/build-native.sh and stage native-artifacts first`);
+  }
+}
 
 const config = (
 	_: { WEBPACK_SERVE?: boolean },
