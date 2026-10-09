@@ -15,5 +15,7 @@
     "sha256": "8453e05a2e334cac891f41faa8582e43263c711b491256500d126f442c231749"
   },
   "build_target": "32-bit ARM glibc; candidate only until verified against running LG C5 input daemons",
-  "production_payload": "unchanged"
+  "production_payload": "source-built",
+  "native_event_protocol": "homeback-remote-ipc-v1",
+  "legacy_release": "v0.7.1-c5-native-test.1"
 }
