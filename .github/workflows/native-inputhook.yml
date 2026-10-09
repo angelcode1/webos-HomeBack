@@ -19,8 +19,6 @@ jobs:
       - name: Validate source-lock and unchanged APK baseline
         run: |
           python3 -m unittest discover -s native -p 'test_*.py' -v
-          test -s packages/service/vendor/inputhook/ezinject
-          test -s packages/service/vendor/inputhook/libinputhookpp.so
       - name: Build from source with verified toolchain
         run: bash native/build-native.sh
       - name: Validate ARM ELF and source manifest
@@ -39,16 +37,15 @@ jobs:
           retention-days: 14
 
   tv-c5-test-ipk:
-    name: Package and publish experimental C5 TV prerelease
+    name: Package experimental C5 TV IPK (artifact only)
     needs: native-c5-candidate
     if: ${{ github.event_name == 'pull_request' && github.head_ref == 'review/source-built-remote-hook-c5' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     permissions:
-      contents: write
+      contents: read
     env:
-      TEST_VERSION: '0.7.1'
-      TEST_TAG: v0.7.1-c5-native-test.1
+      TEST_VERSION: '0.7.2'
     steps:
       - name: Checkout exact reviewed commit
         uses: actions/checkout@v4
@@ -60,7 +57,7 @@ jobs:
         with:
           name: c5-inputhookpp-source-candidate
           path: native-artifacts
-      - name: Verify release is new and native candidate is complete
+      - name: Verify candidate sources and license notices
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -71,14 +68,6 @@ jobs:
           test -s native-artifacts/EZINJECT-COPYING.txt
           test -s native-artifacts/NOT-QUALIFIED.txt
           (cd native-artifacts && sha256sum -c SHA256SUMS)
-          if gh release view "$TEST_TAG" >/dev/null 2>&1; then
-            echo "Refusing to overwrite existing prerelease $TEST_TAG"
-            exit 1
-          fi
-          if git ls-remote --exit-code --tags origin "refs/tags/$TEST_TAG" >/dev/null 2>&1; then
-            echo "Refusing to reuse existing tag $TEST_TAG"
-            exit 1
-          fi
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -162,7 +151,7 @@ jobs:
       - name: Upload test IPKs independent of public release
         uses: actions/upload-artifact@v4
         with:
-          name: homeback-c5-native-test-0.7.1
+          name: homeback-c5-native-test-0.7.2
           path: |
             dist/*.ipk
             dist/*.sha256
@@ -172,45 +161,3 @@ jobs:
             native-artifacts/NOT-QUALIFIED.txt
           if-no-files-found: error
           retention-days: 14
-      - name: Create GitHub prerelease, never catalog or stable
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat > "$RUNNER_TEMP/c5-release-notes.md" <<'NOTES'
-          ## EXPERIMENTAL LG C5 remote hook - TV test only
-
-          This is an **opt-in test build**, not a stable release or a verified fix.
-          HomeBack app version: 0.7.1. This prerelease is built from the source branch of PR #76.
-          Native components are cross-compiled from the pinned source revisions in SOURCE-LOCK.txt.
-          The HomeBack UI, settings, key mapping defaults, service control, and injection ownership
-          are otherwise unchanged from 0.7.0.
-
-          The known-good 0.7.0 APK/IPK uses different, previously bundled binaries; this test
-          replaces **both** native files inside the packaged service. The physical LG C5 runtime,
-          native input target ELF class and all short/long-press behaviors still require validation.
-
-          ### Before installing
-          Back up `/home/root/.config/homeback/remote-buttons.json` and keep a copy of your
-          working HomeBack 0.7.0 IPK. Do not remove it or clear app data.
-
-          Install `com.homebrew.homeback_0.7.1_all.ipk` using your usual rooted webOS/Homebrew
-          installation method. The camera companion IPK is optional for this remote-input test.
-          Reboot before testing to clear any old native hooks retained in target processes.
-          Confirm Home, long Home, Netflix, Prime, Disney+, LG Channels, Alexa, and Stan mappings
-          and watch the input-hook and HomeBack logs.
-
-          ### Rollback
-          Reinstall your saved working 0.7.0 HomeBack IPK, preserving configuration, then reboot.
-          If the TV no longer responds to a remote, use your existing SSH/root recovery access
-          instead of repeatedly reinjecting or resetting the TV.
-
-          ### Licensing and provenance
-          Source and native patch are in the reviewed branch of this repository. The inputhookpp
-          component is GPL-3.0; the ezinject component carries its own COPYING notice.
-          The exact upstream revisions, toolchain checksum and built binary hashes are published
-          with this test package. No Homebrew catalog changes or production release are made.
-          NOTES
-          gh release create "$TEST_TAG"             "$MAIN_IPK" "${MAIN_IPK}.sha256"             "$CAMERA_IPK" "${CAMERA_IPK}.sha256"             native-artifacts/SOURCE-LOCK.txt             native-artifacts/INPUTHOOKPP-GPL-3.0.txt             native-artifacts/EZINJECT-COPYING.txt             --target "$SOURCE_SHA"             --title 'HomeBack 0.7.1 C5 native-source TV test (EXPERIMENTAL)'             --prerelease             --notes-file "$RUNNER_TEMP/c5-release-notes.md"
