@@ -1,11 +1,23 @@
 #!/usr/bin/env node
-
+/**
+ * Public-release publication gate.
+ *
+ * HomeBack derives from GPL-2.0-only AltHome, whereas the separately
+ * source-built native inputhookpp component is GPL-3.0. A release must
+ * comply with both licenses and carry source/build provenance.
+ *
+ * This is a maintainer acknowledgement, not automatic license clearance.
+ */
 const confirmed = process.env.HOMEBACK_NATIVE_REDISTRIBUTION_CONFIRMED === '1';
-
-if (confirmed) {
-	console.log('Native payload redistribution confirmation acknowledged for this release.');
-	process.exit(0);
+if (!confirmed) {
+  console.error(
+    'Public release blocked: native redistribution and GPL-2.0-only/GPL-3.0 compatibility ' +
+    'have not been acknowledged by the maintainer for this source-built release.\n\n' +
+    'Review THIRD_PARTY_NOTICES.md, native/README.md, the pinned source and patches, ' +
+    'and the exact IPK contents. Confirm source availability and license obligations.\n\n' +
+    'Set HOMEBACK_NATIVE_REDISTRIBUTION_CONFIRMED=1 only after that review.\n' +
+    'This acknowledgement is not itself a legal determination.'
+  );
+  process.exit(1);
 }
-
-console.error(`Public release blocked: the bundled ezinject/libinputhookpp.so payload came from an\nunofficial community build whose modified-source provenance and redistribution terms have not\nyet been confirmed. See THIRD_PARTY_NOTICES.md.\n\nAfter the maintainer has independently confirmed redistribution rights for these exact binaries,\nrerun the release with:\n\n  HOMEBACK_NATIVE_REDISTRIBUTION_CONFIRMED=1 ./scripts/release.sh\n\nThis guard is not a legal determination; it prevents accidental publication while provenance is open.`);
-process.exit(1);
+console.log('Maintainer acknowledged native provenance and distribution review for this release.');
