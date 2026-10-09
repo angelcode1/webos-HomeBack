@@ -56,6 +56,8 @@ class CandidatePatchTests(unittest.TestCase):
         module_spec.loader.exec_module(candidate)
         # Representative known upstream sites; the patch must match all of them.
         cpp = '''#include <filesystem>
+        if (action == "ignore") {
+        }
                     const std::string command =
                             "luna-send -n 1 \\"luna://com.webos.applicationManager/launch\\" '" + json.dump() + "'";
     if (action == Action::REPLACE) {
@@ -93,6 +95,10 @@ class CandidatePatchTests(unittest.TestCase):
             self.assertIn('shellQuote(json.dump())', output)
             self.assertIn('std::lock_guard<std::mutex> keybindLock(m_keybind_mutex)', output)
             self.assertIn('std::vector<input_event_t> copied(', output)
+            self.assertIn('homebackEmitEvent(keycode, state)', output)
+            self.assertIn('MSG_DONTWAIT | MSG_NOSIGNAL', output)
+            self.assertIn('homebackLeaseFresh()', output)
+            self.assertIn('Action::PASS, keycode', output)
             self.assertIn('INFO("write to /dev/uinput: code=%d, value=%d"', output)
             self.assertNotIn('events[0].code = newKeycode;', output)
             self.assertIn('-Wl,-Bsymbolic', (path / 'CMakeLists.txt').read_text())
