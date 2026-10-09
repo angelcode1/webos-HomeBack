@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "source": {
+    "inputhookpp": {
+      "repository": "https://github.com/sundermann/inputhookpp.git",
+      "commit": "9dc3cf140cb1ae1dbe059525c72710deea7ecf7d"
+    },
+    "ezinject": {
+      "repository": "https://github.com/smx-smx/ezinject.git",
+      "commit": "607055c06b037eadc3992008940d99bdc4a14f53"
+    }
+  },
+  "toolchain": {
+    "url": "https://github.com/sundermann/buildroot-nc4/releases/download/2025.02-03/linux-intel-lgtv-sdk.tar.gz",
+    "sha256": "8453e05a2e334cac891f41faa8582e43263c711b491256500d126f442c231749"
+  },
+  "build_target": "32-bit ARM glibc; candidate only until verified against running LG C5 input daemons",
+  "production_payload": "unchanged"
+}
