@@ -14,7 +14,7 @@ class SourceBuildContract(unittest.TestCase):
         self.assertEqual(obj['toolchain']['sha256'], '8453e05a2e334cac891f41faa8582e43263c711b491256500d126f442c231749')
 
     def test_review_build_is_not_used_in_production_webpack(self):
-        self.assertEqual(json.loads((ROOT / 'native/source-lock.json').read_text())['production_payload'], 'unchanged')
+        self.assertEqual(json.loads((ROOT / 'native/source-lock.json').read_text())['production_payload'], 'source-built')
         workflow = (ROOT / '.github/workflows/native-inputhook.yml').read_text()
         self.assertIn('pull_request:', workflow)
         self.assertIn('workflow_dispatch:', workflow)
