@@ -19,6 +19,7 @@ import { InjectionManager } from './remote-injection-manager';
 import { ESSENTIAL_TARGET_NAMES } from './remote-input-lifecycle';
 import { hasVerifiedNativeOwnership } from './remote-input-ownership';
 import { NativeConfigWriter } from './native-config-writer';
+import { NativeRemoteChannel } from './native-remote-channel';
 import { RemoteActionRunner } from './remote-action-runner';
 import {
 	DEFAULT_LONG_PRESS_MS,
@@ -65,6 +66,7 @@ export class RemoteInputManager {
 	private readonly scanner: ProcessScanner;
 	private readonly injectionManager: InjectionManager;
 	private readonly nativeConfigWriter: NativeConfigWriter;
+	private readonly nativeEvents: NativeRemoteChannel;
 	private logTimer: NodeJS.Timeout | null = null;
 	private processTimer: NodeJS.Timeout | null = null;
 	private configTimer: NodeJS.Timeout | null = null;
@@ -77,7 +79,8 @@ export class RemoteInputManager {
 		this.actionRunner = new RemoteActionRunner(service);
 		this.pressState = new RemotePressStateMachine(() => this.config, this.actionRunner);
 		this.scanner = new ProcessScanner(TARGET_NAMES, INPUTHOOK_LIBRARY_PATH);
-		this.nativeConfigWriter = new NativeConfigWriter(NATIVE_CONFIG_PATH);
+		this.nativeConfigWriter = new NativeConfigWriter(NATIVE_CONFIG_PATH, true);
+		this.nativeEvents = new NativeRemoteChannel();
 		this.processScans = new CoalescedTask<void>(
 			() => this.scanProcessesOnce(),
 			() => undefined,
@@ -127,8 +130,10 @@ export class RemoteInputManager {
 		this.eventTailerHealthy = false;
 		this.pressState.stop();
 
+		await this.nativeEvents.setAuthorized(false);
 		await this.nativeConfigWriter.setArmed(this.config, false);
 		this.logTailer.closeAll();
+		await this.nativeEvents.stop();
 	}
 
 	/**
@@ -177,6 +182,9 @@ export class RemoteInputManager {
 			lastKeyEvent: this.pressState.lastKeyEvent,
 			lastAction: this.actionRunner.lastAction,
 			logCursorCount: this.logTailer.size,
+			structuredEventsReady: this.nativeEvents.ready,
+			structuredEventsDelivered: this.nativeEvents.deliveredEvents,
+			structuredEventsRejected: this.nativeEvents.rejectedEvents,
 		};
 	}
 
@@ -194,6 +202,7 @@ export class RemoteInputManager {
 	private async startOnce(): Promise<void> {
 		await this.ensureConfigFiles();
 		await this.reloadConfig(true);
+		await this.nativeEvents.start((keycode, state) => this.pressState.handleNativeEvent(keycode, state));
 		await fs.chmod(EZINJECT_PATH, 0o755);
 		await this.scanProcesses();
 
@@ -298,14 +307,21 @@ export class RemoteInputManager {
 	private async syncTimedMappingsArmed(): Promise<void> {
 		const shouldArm =
 			this.started &&
+			this.nativeEvents.ready &&
 			this.eventTailerHealthy &&
 			this.logTailer.size > 0 &&
 			this.isNativeOwnershipVerified();
+		if (!shouldArm) await this.nativeEvents.setAuthorized(false);
 		await this.nativeConfigWriter.setArmed(this.config, shouldArm);
+		if (shouldArm) await this.nativeEvents.setAuthorized(true);
 	}
 
 	private async pollEventLogs(): Promise<void> {
-		this.eventTailerHealthy = this.logTailer.poll(line => this.pressState.handleLogLine(line));
+		// Diagnostic logs are no longer the normal key-event transport. Keep
+		// parsing only for external/legacy inputhook installations.
+		this.eventTailerHealthy = this.logTailer.poll(line => {
+			if (this.legacyMode) this.pressState.handleLogLine(line);
+		});
 		await this.syncTimedMappingsArmed();
 	}
 
