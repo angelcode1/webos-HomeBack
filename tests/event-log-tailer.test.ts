@@ -104,3 +104,20 @@ test('event log tailer reports a retained descriptor failure as unhealthy', () =
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test('oversized unterminated diagnostic log lines stay bounded and signal unhealthy', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'homeback-long-log-test-'));
+	const logPath = join(dir, 'hook.log');
+	writeFileSync(logPath, 'x'.repeat(70 * 1024), { mode: 0o600 });
+	const fd = openSync(logPath, fsConstants.O_RDWR | fsConstants.O_NOFOLLOW);
+	const tailer = new EventLogTailer();
+	try {
+		tailer.add(logPath, fd, 0, false);
+		assert.equal(tailer.poll(() => undefined), false);
+		appendFileSync(logPath, 'Key 773 is ignored\\n');
+		assert.equal(tailer.poll(() => undefined), true);
+	} finally {
+		tailer.closeAll();
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
