@@ -468,7 +468,7 @@ HomeBack builds on work from the webOS homebrew community:
 
 ### Native input hook: built from public source since v0.7.2
 
-**HomeBack no longer includes the old unofficial community hook build in current releases.** From v0.7.2 onwards, the release pipeline cross-compiles the injector and native hook from pinned public sources for LG's **32-bit ARM userspace**, applies HomeBack's auditable patch, runs native contract tests, and packages the resulting build artifacts. The Git repository does **not** track precompiled native executables.
+From **v0.7.2** onwards, the release pipeline cross-compiles the injector and native hook from pinned public sources for LG's **32-bit ARM userspace**, applies HomeBack's auditable patch, runs native contract tests, and packages the resulting build artifacts. The Git repository does **not** track precompiled native executables.
 
 - **Pinned upstream revisions and toolchain checksum:** [`native/source-lock.json`](./native/source-lock.json)
 - **Reproducible build and patch:** [`native/build-native.sh`](./native/build-native.sh) and [`native/patch-inputhook.py`](./native/patch-inputhook.py)
