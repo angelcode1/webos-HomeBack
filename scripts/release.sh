@@ -23,6 +23,23 @@ mkdir -p "$OUT"
 echo '[1/8] Checking public-release provenance gate...'
 corepack yarn verify:publication
 
+echo '[native] Building pinned ARM32 source hook before HomeBack packaging...'
+if [[ "$(uname -s)" != "Linux" ]]; then
+    echo 'Native build requires the pinned Linux ARM32 cross-toolchain; use the GitHub workflow or a Linux builder.'
+    exit 1
+fi
+bash native/build-native.sh
+(
+    cd native-artifacts
+    sha256sum -c SHA256SUMS
+)
+cp native-artifacts/ezinject packages/service/vendor/inputhook/
+cp native-artifacts/libinputhookpp.so packages/service/vendor/inputhook/
+cp native-artifacts/INPUTHOOKPP-GPL-3.0.txt packages/service/vendor/inputhook/
+cp native-artifacts/EZINJECT-COPYING.txt packages/service/vendor/inputhook/
+cp native-artifacts/SOURCE-LOCK.txt packages/service/vendor/inputhook/
+cp native-artifacts/NOT-QUALIFIED.txt packages/service/vendor/inputhook/
+
 echo '[2/8] Verifying source, tests, types and lint...'
 corepack yarn check:full
 
