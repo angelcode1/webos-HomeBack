@@ -22,11 +22,11 @@ class SourceBuildContract(unittest.TestCase):
         self.assertNotIn('release create', candidate_job)
         self.assertIn('if: ${{ github.event_name ==', workflow)
         self.assertIn("'review/source-built-remote-hook-c5'", workflow)
-        self.assertIn('--prerelease', workflow)
+        self.assertNotIn('gh release create', workflow)
         self.assertIn('Assert packaged hook exactly matches compiled candidate', workflow)
         self.assertNotIn('gh release', candidate_job)
         self.assertIn('c5-inputhookpp-source-candidate', workflow)
-        self.assertIn('test -s packages/service/vendor/inputhook/libinputhookpp.so', workflow)
+        self.assertIn('homeback-c5-native-test-0.7.2', workflow)
 
     def test_patch_preserves_event_log_contract_and_rejects_unknown_sources(self):
         patch = (ROOT / 'native/patch-inputhook.py').read_text()
