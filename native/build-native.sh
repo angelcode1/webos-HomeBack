@@ -61,6 +61,8 @@ INSTALL_LIB="$WORK/inputhookpp-build/libinputhookpp.so"
 }
 cp -- "$INSTALL_BIN" "$OUT/ezinject"
 cp -- "$INSTALL_LIB" "$OUT/libinputhookpp.so"
+cp -- "$WORK/inputhookpp/LICENSE" "$OUT/INPUTHOOKPP-GPL-3.0.txt"
+cp -- "$WORK/ezinject/COPYING" "$OUT/EZINJECT-COPYING.txt"
 for artifact in "$OUT/ezinject" "$OUT/libinputhookpp.so"; do
   readelf -h "$artifact" | grep -Eq 'Class:[[:space:]]*ELF32' || {
     echo "Wrong ELF class: $artifact" >&2; exit 1;
