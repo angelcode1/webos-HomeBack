@@ -27,6 +27,11 @@ echo "Computed Installed-Size: ${INSTALLED_SIZE} KiB"
 
 sed -i "/^Architecture:/a Installed-Size: ${INSTALLED_SIZE}" control_extract/control
 
+# The plugin also omits webOS-Packager-Version, which apps-repo's ipk-verify
+# requires (else "looks hand-rolled"). ares-package itself writes the literal x.y.x.
+grep -q '^webOS-Packager-Version:' control_extract/control \
+  || echo 'webOS-Packager-Version: x.y.x' >> control_extract/control
+
 rm -f control.tar.gz
 tar czf control.tar.gz -C control_extract control
 
